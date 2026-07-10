@@ -1396,15 +1396,15 @@ async def health_check():
     context_settings=dict(ignore_unknown_options=True, allow_extra_args=True)
 )
 @click.pass_context
-@click.option("--host", default="127.0.0.1", help="Server host (default: 127.0.0.1)")
-@click.option("--port", default=8000, type=int, help="Server port (default: 8000)")
-@click.option("--reload", is_flag=True, help="Enable auto-reload (development mode)")
+@click.option("--host", default="127.0.0.1", help="Хост сервера (по умолчанию: 127.0.0.1)")
+@click.option("--port", default=8000, type=int, help="Порт сервера (по умолчанию: 8000)")
+@click.option("--reload", is_flag=True, help="Включить автоперезагрузку (режим разработки)")
 @click.option(
     "--allow-public-http-client",
     is_flag=True,
     help=(
-        "Allow *-http-client backends and server_url even when binding the API to "
-        "0.0.0.0 or ::."
+        "Разрешить бэкенды *-http-client и server_url, даже если API привязан к "
+        "0.0.0.0 или ::."
     ),
 )
 @click.option(
@@ -1412,7 +1412,7 @@ async def health_check():
     "enable_vlm_preload",
     type=bool,
     default=False,
-    help="Preload the local VLM model during mineru-api startup.",
+    help="Предзагружать локальную VLM-модель при запуске mineru-api.",
 )
 def main(
     ctx,

@@ -3,6 +3,7 @@
 import asyncio
 import html as html_lib
 import httpx
+import json
 import os
 import re
 import sys
@@ -247,10 +248,14 @@ STATUS_STEP_DEFINITIONS = [
 
 
 def normalize_mineru_locale(locale):
-    """统一自定义 HTML 的语言归一规则：中文使用 zh，其他语言降级为英文。"""
+    """统一自定义 HTML 的语言归一规则，俄语和乌克兰语分别保留。"""
     normalized = str(locale or "").strip().lower()
     if normalized.startswith("zh"):
         return "zh"
+    if normalized.startswith("ru"):
+        return "ru"
+    if normalized.startswith("uk"):
+        return "uk"
     return "en"
 
 
@@ -261,7 +266,7 @@ def resolve_i18n_text(i18n, key, locale=None):
     translations = getattr(i18n, "translations", None)
     if translations:
         preferred_locale = normalize_mineru_locale(
-            locale or os.getenv("MINERU_GRADIO_DEFAULT_LOCALE", "zh")
+            locale or os.getenv("MINERU_GRADIO_DEFAULT_LOCALE", "ru")
         )
         preferred_text = translations.get(preferred_locale, {}).get(key)
         if preferred_text is not None:
@@ -313,7 +318,7 @@ def resolve_request_locale(request):
 def build_client_i18n_attrs(i18n, key):
     """为自定义 HTML 输出中英文文案属性，交给前端按浏览器语言切换。"""
     attrs = [f'data-mineru-i18n-key="{html_lib.escape(key, quote=True)}"']
-    for locale in ("en", "zh"):
+    for locale in ("en", "zh", "ru", "uk"):
         text = resolve_i18n_text(i18n, key, locale)
         attrs.append(f'data-mineru-i18n-{locale}="{html_lib.escape(text, quote=True)}"')
     return " ".join(attrs)
@@ -450,6 +455,35 @@ APP_JS = load_resource_text('gradio_app.js')
 # Gradio 6 的 js 参数在部分托管环境里只注入函数文本，使用 head 包装确保页面加载后主动执行。
 APP_HEAD = f"""
 <script>
+window.__mineruUiTranslations = __MINERU_UI_TRANSLATIONS__;
+(() => {{
+    const storageKey = "mineru-ui-locale";
+    let locale = "ru";
+    try {{
+        const queryLocale = new URLSearchParams(window.location.search).get("lang");
+        const storedLocale = localStorage.getItem(storageKey);
+        locale = queryLocale === "uk" || (queryLocale !== "ru" && storedLocale === "uk")
+            ? "uk"
+            : "ru";
+        localStorage.setItem(storageKey, locale);
+        document.cookie = `${{storageKey}}=${{locale}}; Path=/; Max-Age=31536000; SameSite=Lax`;
+    }} catch (_error) {{
+        // Private browsing or a restrictive policy can disable localStorage.
+    }}
+    const defineLocale = (property, value) => {{
+        try {{
+            Object.defineProperty(navigator, property, {{
+                configurable: true,
+                get: () => value,
+            }});
+        }} catch (_error) {{
+            // Gradio will use the browser locale if Navigator cannot be overridden.
+        }}
+    }};
+    defineLocale("language", locale);
+    defineLocale("languages", [locale]);
+    document.documentElement.lang = locale;
+}})();
 (() => {{
     const installMineruAdvancedPopover = {APP_JS};
     if (document.readyState === "loading") {{
@@ -1304,29 +1338,32 @@ latex_delimiters_type_all = latex_delimiters_type_a + latex_delimiters_type_b
 header_template = load_resource_text('gradio_header.html')
 
 HEADER_I18N_PLACEHOLDERS = {
+    "{{APP_WORKSPACE}}": "app_workspace",
+    "{{TOOLS_LABEL}}": "tools_label",
+    "{{TOOLS_LABEL_ATTR}}": "tools_label",
+    "{{ACTIVE_TOOL}}": "active_tool",
+    "{{FUTURE_TOOLS_ATTR}}": "future_tools",
+    "{{TOOL_SLOT}}": "tool_slot",
+    "{{TOOL_SLOT_HINT}}": "tool_slot_hint",
+    "{{LOCAL_MODE}}": "local_mode",
+    "{{LANGUAGE_LABEL}}": "language_label",
+    "{{LANGUAGE_LABEL_ATTR}}": "language_label",
     "{{HEADER_TITLE}}": "header_title",
     "{{HEADER_SUBTITLE}}": "header_subtitle",
-    "{{HEADER_SUPPORT_TEXT}}": "header_support_text",
-    "{{HEADER_STARS_ALT}}": "header_stars_alt",
-    "{{HEADER_CODE_LINK}}": "header_code_link",
-    "{{HEADER_MODEL_LINK}}": "header_model_link",
-    "{{HEADER_MODEL_HUGGINGFACE_LINK}}": "header_model_huggingface_link",
-    "{{HEADER_MODEL_MODELSCOPE_LINK}}": "header_model_modelscope_link",
-    "{{HEADER_PAPER_LINK}}": "header_paper_link",
-    "{{HEADER_PAPER_MINERU_REPORT}}": "header_paper_mineru_report",
-    "{{HEADER_PAPER_MINERU25_REPORT}}": "header_paper_mineru25_report",
-    "{{HEADER_PAPER_MINERU25PRO_REPORT}}": "header_paper_mineru25pro_report",
-    "{{HEADER_HOMEPAGE_LINK}}": "header_homepage_link",
-    "{{HEADER_DOWNLOAD_LINK}}": "header_download_link",
+}
+HEADER_I18N_ATTRIBUTE_PLACEHOLDERS = {
+    "{{TOOLS_LABEL_ATTR}}",
+    "{{FUTURE_TOOLS_ATTR}}",
+    "{{LANGUAGE_LABEL_ATTR}}",
 }
 HEADER_GRADIO_VERSION_CLASS_PLACEHOLDER = "{{HEADER_GRADIO_VERSION_CLASS}}"
 
 
 def render_header_html(i18n):
-    """渲染支持 i18n 的顶部 Header，保留静态模板中的样式和链接。"""
+    """渲染支持 i18n 的中性工具导航侧栏。"""
     rendered_header = header_template
     for placeholder, translation_key in HEADER_I18N_PLACEHOLDERS.items():
-        if translation_key == "header_stars_alt":
+        if placeholder in HEADER_I18N_ATTRIBUTE_PLACEHOLDERS:
             replacement = html_lib.escape(translate_ui(i18n, translation_key), quote=True)
         else:
             replacement = render_client_i18n_text(i18n, translation_key)
@@ -1339,6 +1376,22 @@ def render_header_html(i18n):
         " mineru-gradio6-header" if IS_GRADIO_6 else "",
     )
     return rendered_header
+
+
+def render_workspace_intro_html(i18n):
+    """Рендерит заголовок активного инструмента над рабочими панелями."""
+    return (
+        '<section class="mineru-workspace-intro">'
+        '<div class="mineru-workspace-title-group">'
+        f'<div class="mineru-workspace-eyebrow">{render_client_i18n_text(i18n, "current_tool")}</div>'
+        f'<h1>{render_client_i18n_text(i18n, "header_title")}</h1>'
+        f'<p>{render_client_i18n_text(i18n, "header_subtitle")}</p>'
+        '</div>'
+        '<div class="mineru-format-list" aria-label="Supported formats">'
+        '<span>PDF</span><span>DOCX</span><span>PPTX</span><span>XLSX</span>'
+        '</div>'
+        '</section>'
+    )
 
 all_lang = list(PUBLIC_OCR_LANGUAGE_CHOICES)
 
@@ -1489,72 +1542,72 @@ def update_doc_show(file_path):
     '--enable-example',
     'example_enable',
     type=bool,
-    help="Enable example files for input."
-         "The example files to be input need to be placed in the `examples` folder within the directory where the command is currently executed.",
+    help="Включить примеры файлов для загрузки. "
+         "Файлы примеров нужно поместить в папку `examples` внутри директории, из которой запускается команда.",
     default=True,
 )
 @click.option(
     '--enable-http-client',
     'http_client_enable',
     type=bool,
-    help="Enable http-client backend to link openai-compatible servers.",
+    help="Включить бэкенд http-client для подключения к OpenAI-совместимым серверам.",
     default=False,
 )
 @click.option(
     '--enable-api',
     'api_enable',
     type=bool,
-    help="Enable gradio API for serving the application.",
+    help="Включить Gradio API для обслуживания приложения.",
     default=True,
 )
 @click.option(
     '--max-convert-pages',
     'max_convert_pages',
     type=int,
-    help="Set the maximum number of pages to convert from PDF to Markdown.",
+    help="Задать максимальное число страниц для конвертации из PDF в Markdown.",
     default=1000,
 )
 @click.option(
     '--server-name',
     'server_name',
     type=str,
-    help="Set the server name for the Gradio app.",
+    help="Задать имя сервера для приложения Gradio.",
     default=None,
 )
 @click.option(
     '--server-port',
     'server_port',
     type=int,
-    help="Set the server port for the Gradio app.",
+    help="Задать порт сервера для приложения Gradio.",
     default=None,
 )
 @click.option(
     '--api-url',
     'api_url',
     type=str,
-    help="MinerU FastAPI base URL. If omitted, gradio starts a reusable local mineru-api service.",
+    help="Базовый URL MinerU FastAPI. Если не указан, gradio запускает переиспользуемый локальный сервис mineru-api.",
     default=None,
 )
 @click.option(
     '--enable-vlm-preload',
     'enable_vlm_preload',
     type=bool,
-    help="Preload the local VLM model when gradio starts a local mineru-api service.",
+    help="Предзагружать локальную VLM-модель при запуске gradio с локальным сервисом mineru-api.",
     default=False,
 )
 @click.option(
     '--client-side-output-generation',
     'client_side_output_generation',
     type=bool,
-    help="Generate markdown and content lists locally from server-returned middle json.",
+    help="Формировать Markdown и списки содержимого локально на основе middle json, полученного от сервера.",
     default=False,
 )
 @click.option(
     '--latex-delimiters-type',
     'latex_delimiters_type',
     type=click.Choice(['a', 'b', 'all']),
-    help="Set the type of LaTeX delimiters to use in Markdown rendering:"
-         "'a' for type '$', 'b' for type '()[]', 'all' for both types.",
+    help="Задать тип разделителей LaTeX для рендеринга Markdown: "
+         "'a' — тип '$', 'b' — тип '()[]', 'all' — оба типа.",
     default='all',
 )
 def main(ctx,
@@ -1569,8 +1622,17 @@ def main(ctx,
     i18n = gr.I18n(
         en={
             "upload_file": "Select or paste a file to upload\nPDF, image, DOCX, PPTX, or XLSX",
-            "header_title": "MinerU 3: Document Extraction Demo",
-            "header_subtitle": "Open-source document extraction for PDF, DOCX, PPTX, XLSX, and images to Markdown and JSON.",
+            "app_workspace": "Workspace",
+            "tools_label": "Tools",
+            "active_tool": "Active tool",
+            "future_tools": "Future tools",
+            "tool_slot": "Available slot",
+            "tool_slot_hint": "For a new tool",
+            "local_mode": "Local mode",
+            "language_label": "Language",
+            "current_tool": "Current tool",
+            "header_title": "Document recognition",
+            "header_subtitle": "Convert PDF, Office documents, and images into structured Markdown and JSON.",
             "header_support_text": "If you found our project helpful, please give us a ⭐️ to support us!",
             "header_stars_alt": "stars",
             "header_code_link": "Code",
@@ -1645,8 +1707,17 @@ def main(ctx,
         },
         zh={
             "upload_file": "请选择或粘贴要上传的文件\nPDF、图片、DOCX、PPTX 或 XLSX",
-            "header_title": "MinerU 3：文档提取演示",
-            "header_subtitle": "开源文档提取工具，支持将 PDF、DOCX、PPTX、XLSX 和图片转换为 Markdown 与 JSON。",
+            "app_workspace": "工作区",
+            "tools_label": "工具",
+            "active_tool": "当前工具",
+            "future_tools": "后续工具",
+            "tool_slot": "空闲位置",
+            "tool_slot_hint": "用于新工具",
+            "local_mode": "本地模式",
+            "language_label": "语言",
+            "current_tool": "当前工具",
+            "header_title": "文档识别",
+            "header_subtitle": "将 PDF、Office 文档和图片转换为结构化 Markdown 与 JSON。",
             "header_support_text": "如果我们的项目对你有帮助，请点亮 ⭐️ 支持我们！",
             "header_stars_alt": "GitHub 星标",
             "header_code_link": "代码",
@@ -1718,6 +1789,186 @@ def main(ctx,
             "backend_info_default": "选择文档解析的后端引擎。",
             "hybrid_effort": "解析强度",
             "hybrid_effort_info": "Medium 速度更快；High 精度更高，耗时可能更长。",
+        },
+        ru={
+            "upload_file": "Выберите или вставьте файл для загрузки\nPDF, изображение, DOCX, PPTX или XLSX",
+            "app_workspace": "Рабочая среда",
+            "tools_label": "Инструменты",
+            "active_tool": "Активный инструмент",
+            "future_tools": "Будущие инструменты",
+            "tool_slot": "Свободный слот",
+            "tool_slot_hint": "Для нового инструмента",
+            "local_mode": "Локальный режим",
+            "language_label": "Язык",
+            "current_tool": "Текущий инструмент",
+            "header_title": "Распознавание документов",
+            "header_subtitle": "Преобразование PDF, документов Office и изображений в структурированные Markdown и JSON.",
+            "header_support_text": "Если наш проект оказался полезен, поставьте ⭐️ — это нас поддержит!",
+            "header_stars_alt": "звёзды",
+            "header_code_link": "Код",
+            "header_model_link": "Модель",
+            "header_model_huggingface_link": "Hugging Face",
+            "header_model_modelscope_link": "ModelScope",
+            "header_paper_link": "Статья",
+            "header_paper_mineru_report": "MinerU · arXiv: 2409.18839",
+            "header_paper_mineru25_report": "MinerU 2.5 · arXiv: 2509.22186",
+            "header_paper_mineru25pro_report": "MinerU 2.5 Pro · arXiv: 2604.04771",
+            "header_homepage_link": "Главная",
+            "header_download_link": "Скачать",
+            "max_pages": "Макс. число страниц для конвертации",
+            "backend": "Бэкенд",
+            "backend_label_hybrid": "Hybrid (рекомендуется)",
+            "backend_label_pipeline": "Pipeline (стабильный, многоязычный)",
+            "backend_label_vlm": "VLM (высокая точность для китайского/английского)",
+            "backend_label_remote_vlm": "Remote VLM",
+            "backend_label_remote_hybrid": "Remote Hybrid",
+            "server_url": "Адрес сервера",
+            "server_url_info": "URL OpenAI-совместимого сервера для бэкенда http-client.",
+            "recognition_options": "**Параметры распознавания:**",
+            "advanced_options": "Дополнительные параметры",
+            "table_enable": "Распознавать таблицы",
+            "table_info": "Если отключено, таблицы будут показаны как изображения.",
+            "image_analysis_enable": "Анализировать изображения",
+            "image_analysis_info": "Если отключено, блоки изображений/диаграмм сохранят своё положение в макете, но VLM-анализ изображений/диаграмм выполняться не будет.",
+            "formula_label_vlm": "Распознавать блочные формулы",
+            "formula_label_pipeline": "Распознавать формулы",
+            "formula_label_hybrid": "Распознавать строчные формулы",
+            "formula_info_vlm": "Если отключено, блочные формулы будут показаны как изображения.",
+            "formula_info_pipeline": "Если отключено, блочные формулы будут показаны как изображения, а строчные формулы не будут обнаруживаться и распознаваться.",
+            "formula_info_hybrid": "Если отключено, строчные формулы не будут обнаруживаться и распознаваться.",
+            "ocr_language": "Язык OCR",
+            "ocr_language_info": "Выберите язык OCR для сканированных PDF и изображений.",
+            "force_ocr": "Принудительно включить OCR",
+            "force_ocr_info": "Включайте, только если результат крайне низкого качества. Требуется правильно указанный язык OCR.",
+            "force_ocr_info_hybrid": "Включайте, только если результат крайне низкого качества.",
+            "convert": "Конвертировать",
+            "clear": "Очистить",
+            "doc_preview": "Предпросмотр документа",
+            "examples": "Примеры:",
+            "convert_status": "Статус конвертации",
+            "convert_result": "Результат конвертации",
+            "result_file": "Файл результата",
+            "md_rendering": "Рендеринг Markdown",
+            "md_text": "Текст Markdown",
+            "content_list_json": "Список содержимого JSON",
+            "status_idle_title": "Ожидание",
+            "status_idle_hint": "Загрузите файл и начните конвертацию.",
+            "status_latest": "Текущий статус",
+            "status_step_prepare": "Подготовка",
+            "status_step_check": "Проверка сервиса",
+            "status_step_submit": "Отправка",
+            "status_step_queue": "Очередь",
+            "status_step_process": "Разбор",
+            "status_step_download": "Загрузка",
+            "status_step_outputs": "Формирование результатов",
+            "status_step_done": "Готово",
+            "status_step_failed": "Ошибка",
+            "office_preview_title": "Онлайн-предпросмотр Office",
+            "office_preview_notice": "Для этого предпросмотра текущий файл должен быть доступен сервису Microsoft Office Online. Конвертация от этого предпросмотра не зависит.",
+            "office_preview_source_link": "Ссылка на файл",
+            "office_preview_ignore_once": "Скрыть",
+            "office_preview_ignore_forever": "Больше не показывать",
+            "backend_info_vlm": "Сквозной разбор мультимодальной большой моделью, высокая точность.",
+            "backend_info_pipeline": "Классический многомодельный конвейер разбора, малое потребление ресурсов, без галлюцинаций.",
+            "backend_info_hybrid": "Разбор эксклюзивным гибридным движком, сверхвысокая точность.",
+            "backend_info_default": "Выберите бэкенд для разбора документа.",
+            "hybrid_effort": "Интенсивность разбора",
+            "hybrid_effort_info": "Medium — быстрее. High — точнее, но может занять больше времени.",
+        },
+        uk={
+            "upload_file": "Виберіть або вставте файл для завантаження\nPDF, зображення, DOCX, PPTX або XLSX",
+            "app_workspace": "Робоче середовище",
+            "tools_label": "Інструменти",
+            "active_tool": "Активний інструмент",
+            "future_tools": "Майбутні інструменти",
+            "tool_slot": "Вільний слот",
+            "tool_slot_hint": "Для нового інструмента",
+            "local_mode": "Локальний режим",
+            "language_label": "Мова",
+            "current_tool": "Поточний інструмент",
+            "header_title": "Розпізнавання документів",
+            "header_subtitle": "Перетворення PDF, документів Office і зображень на структуровані Markdown та JSON.",
+            "header_support_text": "Якщо наш проєкт став вам у пригоді, поставте ⭐️ — це нас підтримає!",
+            "header_stars_alt": "зірки",
+            "header_code_link": "Код",
+            "header_model_link": "Модель",
+            "header_model_huggingface_link": "Hugging Face",
+            "header_model_modelscope_link": "ModelScope",
+            "header_paper_link": "Стаття",
+            "header_paper_mineru_report": "MinerU · arXiv: 2409.18839",
+            "header_paper_mineru25_report": "MinerU 2.5 · arXiv: 2509.22186",
+            "header_paper_mineru25pro_report": "MinerU 2.5 Pro · arXiv: 2604.04771",
+            "header_homepage_link": "Головна",
+            "header_download_link": "Завантажити",
+            "max_pages": "Макс. кількість сторінок для конвертації",
+            "backend": "Бекенд",
+            "backend_label_hybrid": "Hybrid (рекомендовано)",
+            "backend_label_pipeline": "Pipeline (стабільний, багатомовний)",
+            "backend_label_vlm": "VLM (висока точність для китайської/англійської)",
+            "backend_label_remote_vlm": "Remote VLM",
+            "backend_label_remote_hybrid": "Remote Hybrid",
+            "server_url": "Адреса сервера",
+            "server_url_info": "URL OpenAI-сумісного сервера для бекенда http-client.",
+            "recognition_options": "**Параметри розпізнавання:**",
+            "advanced_options": "Додаткові параметри",
+            "table_enable": "Розпізнавати таблиці",
+            "table_info": "Якщо вимкнено, таблиці відображатимуться як зображення.",
+            "image_analysis_enable": "Аналізувати зображення",
+            "image_analysis_info": "Якщо вимкнено, блоки зображень і діаграм збережуть своє положення в макеті, але VLM-аналіз не виконуватиметься.",
+            "formula_label_vlm": "Розпізнавати блокові формули",
+            "formula_label_pipeline": "Розпізнавати формули",
+            "formula_label_hybrid": "Розпізнавати рядкові формули",
+            "formula_info_vlm": "Якщо вимкнено, блокові формули відображатимуться як зображення.",
+            "formula_info_pipeline": "Якщо вимкнено, блокові формули відображатимуться як зображення, а рядкові формули не виявлятимуться й не розпізнаватимуться.",
+            "formula_info_hybrid": "Якщо вимкнено, рядкові формули не виявлятимуться й не розпізнаватимуться.",
+            "ocr_language": "Мова OCR",
+            "ocr_language_info": "Виберіть мову OCR для сканованих PDF і зображень.",
+            "force_ocr": "Примусово ввімкнути OCR",
+            "force_ocr_info": "Вмикайте лише за дуже низької якості результату. Потрібно правильно вибрати мову OCR.",
+            "force_ocr_info_hybrid": "Вмикайте лише за дуже низької якості результату.",
+            "convert": "Конвертувати",
+            "clear": "Очистити",
+            "doc_preview": "Попередній перегляд документа",
+            "examples": "Приклади:",
+            "convert_status": "Стан конвертації",
+            "convert_result": "Результат конвертації",
+            "result_file": "Файл результату",
+            "md_rendering": "Відтворення Markdown",
+            "md_text": "Текст Markdown",
+            "content_list_json": "Список вмісту JSON",
+            "status_idle_title": "Очікування",
+            "status_idle_hint": "Завантажте файл і почніть конвертацію.",
+            "status_latest": "Поточний стан",
+            "status_step_prepare": "Підготовка",
+            "status_step_check": "Перевірка сервісу",
+            "status_step_submit": "Надсилання",
+            "status_step_queue": "Черга",
+            "status_step_process": "Розпізнавання",
+            "status_step_download": "Завантаження",
+            "status_step_outputs": "Формування результатів",
+            "status_step_done": "Готово",
+            "status_step_failed": "Помилка",
+            "office_preview_title": "Онлайн-перегляд Office",
+            "office_preview_notice": "Для цього перегляду поточний файл має бути доступним сервісу Microsoft Office Online. Конвертація від цього перегляду не залежить.",
+            "office_preview_source_link": "Посилання на файл",
+            "office_preview_ignore_once": "Приховати",
+            "office_preview_ignore_forever": "Більше не показувати",
+            "backend_info_vlm": "Наскрізне розпізнавання мультимодальною великою моделлю з високою точністю.",
+            "backend_info_pipeline": "Класичний багатомодельний конвеєр із низьким споживанням ресурсів і без галюцинацій.",
+            "backend_info_hybrid": "Розпізнавання ексклюзивним гібридним рушієм із надвисокою точністю.",
+            "backend_info_default": "Виберіть бекенд для розпізнавання документа.",
+            "hybrid_effort": "Інтенсивність розпізнавання",
+            "hybrid_effort_info": "Medium — швидше. High — точніше, але може тривати довше.",
+            "upload_text.drop_file": "Перетягніть файл сюди",
+            "upload_text.click_to_upload": "Натисніть для завантаження",
+            "upload_text.paste_clipboard": "Вставити з буфера обміну",
+            "common.or": "або",
+            "common.clear": "Очистити",
+            "common.settings": "Налаштування",
+            "common.logo": "Логотип",
+            "common.built_with_gradio": "Створено за допомогою Gradio",
+            "errors.use_via_api": "Використовувати через API",
+            "errors.use_via_api_or_mcp": "Використовувати через API або MCP",
         },
     )
 
@@ -1824,6 +2075,10 @@ def main(ctx,
     _blocks_kwargs = {} if IS_GRADIO_6 else {"css": APP_CSS, "js": APP_JS}
     with gr.Blocks(**_blocks_kwargs) as demo:
         gr.HTML(render_header_html(i18n), elem_classes=["mineru-header-html"])
+        gr.HTML(
+            render_workspace_intro_html(i18n),
+            elem_classes=["mineru-workspace-heading"],
+        )
         with gr.Row(elem_classes=["mineru-workspace-row"]):
             with gr.Column(variant='panel', scale=2, min_width=280, elem_classes=["mineru-control-column"]):
                 input_file = gr.File(
@@ -2057,10 +2312,23 @@ def main(ctx,
     demo.queue(default_concurrency_limit=None)
 
     if IS_GRADIO_6:
-        footer_links = ["gradio", "settings"]
-        if api_enable:
-            footer_links.append("api")
-        _launch_kwargs = {"footer_links": footer_links, "css": APP_CSS, "head": APP_HEAD}
+        footer_links = []
+        client_translations = json.dumps(
+            {
+                "ru": i18n.translations.get("ru", {}),
+                "uk": i18n.translations.get("uk", {}),
+            },
+            ensure_ascii=False,
+        ).replace("</", "<\\/")
+        localized_app_head = APP_HEAD.replace(
+            "__MINERU_UI_TRANSLATIONS__",
+            client_translations,
+        )
+        _launch_kwargs = {
+            "footer_links": footer_links,
+            "css": APP_CSS,
+            "head": localized_app_head,
+        }
     else:
         _launch_kwargs = {"show_api": api_enable}
     maybe_prepare_local_api_for_gradio_startup(

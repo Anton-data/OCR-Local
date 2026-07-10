@@ -1,5 +1,5 @@
 () => {
-    const POPOVER_SCRIPT_VERSION = "office-preview-dismiss-v1";
+    const POPOVER_SCRIPT_VERSION = "locale-switch-v1";
     if (window.__mineruAdvancedPopoverInstalled === POPOVER_SCRIPT_VERSION) {
         return;
     }
@@ -11,6 +11,7 @@
     const OCR_LANGUAGE_VISIBLE_CLASS = "mineru-show-ocr-language";
     const FORCE_OCR_HIDDEN_CLASS = "mineru-hide-force-ocr";
     const HYBRID_EFFORT_HIDDEN_CLASS = "mineru-hide-hybrid-effort";
+    const UI_LOCALE_STORAGE_KEY = "mineru-ui-locale";
     const OFFICE_PREVIEW_NOTICE_STORAGE_KEY = "mineru.officePreviewNoticeIgnored";
     const OPEN_DELAY_MS = 120;
     const CLOSE_DELAY_MS = 280;
@@ -27,16 +28,22 @@
         "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
     };
-    // 只把中文浏览器语言映射为中文；其他所有语言统一降级到英文。
+    // 俄语和乌克兰语分别保留；其他语言仍按现有回退规则处理。
     const normalizeMineruLocale = (locale) => {
         const normalized = String(locale || "").toLowerCase();
         if (normalized.startsWith("zh")) {
             return "zh";
         }
+        if (normalized.startsWith("ru")) {
+            return "ru";
+        }
+        if (normalized.startsWith("uk")) {
+            return "uk";
+        }
         return "en";
     };
 
-    // 以浏览器首选语言为准；非中文语言包括 en/ja/ko/fr 等都统一使用英文文案。
+    // 启动脚本会把用户选择写入 navigator.language，Gradio 与自定义 HTML 使用同一语言。
     const resolveMineruLocale = () => {
         if (typeof navigator !== "undefined") {
             const languages = Array.from(navigator.languages || []);
@@ -49,15 +56,134 @@
     };
 
     // Gradio 只会自动翻译组件属性；header/status 这类自定义 HTML 需要前端按浏览器语言补一次。
+    // 优先使用当前语言文案，找不到时依次降级到俄语、英语，保证始终有可显示的文本。
     const localizeMineruCustomText = () => {
         const locale = resolveMineruLocale();
         document.querySelectorAll("[data-mineru-i18n-key]").forEach((item) => {
             const localizedText = item.getAttribute(`data-mineru-i18n-${locale}`)
+                || item.getAttribute("data-mineru-i18n-ru")
                 || item.getAttribute("data-mineru-i18n-en");
             if (localizedText !== null && item.textContent !== localizedText) {
                 item.textContent = localizedText;
             }
         });
+    };
+
+    const applyLanguageSwitchState = () => {
+        const locale = resolveMineruLocale();
+        document.querySelectorAll(".mineru-language-option").forEach((button) => {
+            const isActive = button.getAttribute("data-mineru-locale") === locale;
+            button.classList.toggle("is-active", isActive);
+            button.setAttribute("aria-pressed", String(isActive));
+        });
+    };
+
+    const normalizeUiText = (value) => String(value || "").trim().replace(/\s+/g, " ");
+
+    // Gradio 6.8 does not ship a Ukrainian core locale. Translate only interface
+    // containers, never document/Markdown output, so recognized content stays untouched.
+    const localizeGradioInterface = () => {
+        const locale = resolveMineruLocale();
+        const dictionaries = window.__mineruUiTranslations || {};
+        const russian = dictionaries.ru || {};
+        const target = dictionaries[locale] || russian;
+        const translationMap = new Map();
+
+        if (locale === "uk") {
+            Object.keys(russian).forEach((key) => {
+                if (typeof russian[key] === "string" && typeof target[key] === "string") {
+                    translationMap.set(normalizeUiText(russian[key]), target[key]);
+                }
+            });
+        }
+
+        const builtinTranslations = locale === "uk"
+            ? {
+                "Перетащите файл сюда": "Перетягніть файл сюди",
+                "- или -": "- або -",
+                "Нажмите для загрузки": "Натисніть для завантаження",
+                "Использовать через API": "Використовувати через API",
+                "Создано с помощью Gradio": "Створено за допомогою Gradio",
+                "Настройки": "Налаштування",
+                "Логотип": "Логотип",
+                "Reset to default value": "Скинути до типового значення",
+                "Click to upload or drop files": "Натисніть або перетягніть файл для завантаження",
+                "Copy conversation": "Копіювати",
+                "doc preview": "Попередній перегляд документа",
+                "Empty value": "Порожньо",
+                "Stop Recording": "Зупинити запис",
+            }
+            : {
+                "Reset to default value": "Сбросить значение",
+                "Click to upload or drop files": "Нажмите или перетащите файл для загрузки",
+                "Copy conversation": "Копировать",
+                "doc preview": "Предпросмотр документа",
+                "Empty value": "Пусто",
+                "Stop Recording": "Остановить запись",
+            };
+        Object.entries(builtinTranslations).forEach(([source, translated]) => {
+            translationMap.set(normalizeUiText(source), translated);
+        });
+
+        const translateValue = (value) => translationMap.get(normalizeUiText(value));
+        const translateElement = (element) => {
+            Array.from(element.childNodes || []).forEach((node) => {
+                if (node.nodeType !== Node.TEXT_NODE || !node.textContent?.trim()) {
+                    return;
+                }
+                const translated = translateValue(node.textContent);
+                if (!translated) {
+                    return;
+                }
+                const leading = node.textContent.match(/^\s*/)?.[0] || "";
+                const trailing = node.textContent.match(/\s*$/)?.[0] || "";
+                node.textContent = `${leading}${translated}${trailing}`;
+            });
+            ["aria-label", "title", "placeholder", "alt"].forEach((attribute) => {
+                const currentValue = element.getAttribute?.(attribute);
+                let translated = currentValue && translateValue(currentValue);
+                if (currentValue && !translated) {
+                    for (const [source, replacement] of translationMap.entries()) {
+                        if (source && currentValue.includes(source)) {
+                            translated = currentValue.replace(source, replacement);
+                            break;
+                        }
+                    }
+                }
+                if (translated && translated !== currentValue) {
+                    element.setAttribute(attribute, translated);
+                }
+            });
+        };
+
+        const roots = document.querySelectorAll(
+            ".mineru-header-html, .mineru-control-column, .mineru-advanced-popover, footer"
+        );
+        roots.forEach((root) => {
+            translateElement(root);
+            root.querySelectorAll("*").forEach(translateElement);
+        });
+        document.querySelectorAll(
+            ".mineru-markdown-tabs button, .mineru-markdown-tabs [role='tab'], "
+            + ".mineru-preview-pane label, .mineru-preview-pane [data-testid='block-label'], "
+            + ".mineru-preview-pane [aria-label='Empty value'], "
+            + ".mineru-header-html img"
+        ).forEach(translateElement);
+    };
+
+    const selectUiLocale = (locale) => {
+        if (locale !== "ru" && locale !== "uk") {
+            return;
+        }
+        try {
+            localStorage.setItem(UI_LOCALE_STORAGE_KEY, locale);
+        } catch (_error) {
+            // Query parameter below still makes the switch work without localStorage.
+        }
+        document.cookie = `${UI_LOCALE_STORAGE_KEY}=${locale}; Path=/; Max-Age=31536000; SameSite=Lax`;
+        const nextUrl = new URL(window.location.href);
+        nextUrl.searchParams.set("lang", locale);
+        window.location.assign(nextUrl.toString());
     };
 
     // 读取浏览器本地偏好时做容错，避免隐私模式禁用 localStorage 影响页面初始化。
@@ -95,6 +221,8 @@
     // 自定义 HTML 由 Gradio 动态重绘，统一在 DOM 变更后补本地化和忽略状态。
     const refreshMineruCustomHtml = () => {
         localizeMineruCustomText();
+        localizeGradioInterface();
+        applyLanguageSwitchState();
         applyOfficePreviewNoticePreference();
         refreshMineruOptionVisibility();
     };
@@ -504,6 +632,11 @@
             return;
         }
         queueMineruOptionVisibilityRefresh();
+        const languageOption = target.closest(".mineru-language-option");
+        if (languageOption) {
+            selectUiLocale(languageOption.getAttribute("data-mineru-locale"));
+            return;
+        }
         if (target.closest(".office-preview-ignore-forever")) {
             const notice = target.closest(".office-preview-notice");
             if (setOfficePreviewNoticeIgnored()) {

@@ -1036,14 +1036,14 @@ async def run_orchestrated_cli(
 
 @click.command(context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 @click.pass_context
-@click.version_option(__version__, "--version", "-v", help="display the version and exit")
+@click.version_option(__version__, "--version", "-v", help="Показать версию и выйти")
 @click.option(
     "-p",
     "--path",
     "input_path",
     type=click.Path(exists=True, path_type=Path),
     required=True,
-    help="local filepath or directory. support pdf, image, docx, pptx, xlsx files",
+    help="Локальный путь к файлу или директории. Поддерживаются PDF, изображения, DOCX, PPTX, XLSX",
 )
 @click.option(
     "-o",
@@ -1051,14 +1051,14 @@ async def run_orchestrated_cli(
     "output_dir",
     type=click.Path(path_type=Path),
     required=True,
-    help="output local directory",
+    help="Локальная директория для результатов",
 )
 @click.option(
     "--api-url",
     "api_url",
     type=str,
     default=None,
-    help="MinerU FastAPI base URL. If omitted, mineru starts a temporary local mineru-api service.",
+    help="Базовый URL MinerU FastAPI. Если не указан, mineru запускает временный локальный сервис mineru-api.",
 )
 @click.option(
     "-m",
@@ -1067,12 +1067,12 @@ async def run_orchestrated_cli(
     type=click.Choice(["auto", "txt", "ocr"]),
     default="auto",
     help="""\b
-    the method for parsing pdf:
-      auto: Automatically determine the method based on the file type.
-      txt: Use text extraction method.
-      ocr: Use OCR method for image-based PDFs.
-    Without method specified, 'auto' will be used by default.
-    Adapted only for the case where the backend is set to 'pipeline' and 'hybrid-*'.""",
+    метод разбора PDF:
+      auto: определять метод автоматически по типу файла.
+      txt: использовать извлечение текста.
+      ocr: использовать OCR для PDF на основе изображений.
+    Если метод не указан, по умолчанию используется 'auto'.
+    Применяется только если backend установлен в 'pipeline' или 'hybrid-*'.""",
 )
 @click.option(
     "-b",
@@ -1083,13 +1083,13 @@ async def run_orchestrated_cli(
     callback=normalize_backend_option,
     metavar="[" + "|".join(PUBLIC_BACKEND_CHOICES) + "]",
     help="""\b
-    the backend for parsing pdf:
-      pipeline: More general.
-      vlm-engine: High accuracy via local computing power.
-      vlm-http-client: High accuracy via remote computing power(client suitable for openai-compatible servers).
-      hybrid-engine: Next-generation high accuracy solution via local computing power.
-      hybrid-http-client: High accuracy but requires a little local computing power(client suitable for openai-compatible servers).
-    Without backend specified, hybrid-engine will be used by default.""",
+    бэкенд для разбора PDF:
+      pipeline: более универсальный.
+      vlm-engine: высокая точность за счёт локальных вычислительных ресурсов.
+      vlm-http-client: высокая точность за счёт удалённых вычислительных ресурсов (клиент для OpenAI-совместимых серверов).
+      hybrid-engine: решение нового поколения с высокой точностью на локальных вычислительных ресурсах.
+      hybrid-http-client: высокая точность при небольших локальных вычислительных ресурсах (клиент для OpenAI-совместимых серверов).
+    Если backend не указан, по умолчанию используется hybrid-engine.""",
 )
 @click.option(
     "--effort",
@@ -1099,11 +1099,11 @@ async def run_orchestrated_cli(
     callback=normalize_effort_option,
     metavar="[" + "|".join(HYBRID_EFFORT_CHOICES) + "]",
     help="""\b
-    Hybrid parsing effort:
-      medium: Faster parsing for most documents, balancing accuracy and efficiency. Image/chart analysis is disabled.
-      high: Higher-accuracy parsing with image/chart analysis support, which may take longer.
-    Without effort specified, medium will be used by default.
-    Adapted only for the case where the backend is set to 'hybrid-*'.""",
+    интенсивность разбора Hybrid:
+      medium: более быстрый разбор для большинства документов, баланс точности и скорости. Анализ изображений/диаграмм отключён.
+      high: более точный разбор с поддержкой анализа изображений/диаграмм, может занять больше времени.
+    Если effort не указан, по умолчанию используется medium.
+    Применяется только если backend установлен в 'hybrid-*'.""",
 )
 @click.option(
     "-l",
@@ -1114,9 +1114,9 @@ async def run_orchestrated_cli(
     callback=normalize_ocr_lang_option,
     metavar="[" + "|".join(PUBLIC_OCR_LANGUAGES) + "]",
     help="""
-    Input the languages in the pdf (if known) to improve OCR accuracy.
-    Without languages specified, 'ch' will be used by default.
-    Specify document language (improves OCR accuracy, pipeline backend only).
+    Укажите язык документа в PDF (если известен), чтобы повысить точность OCR.
+    Если язык не указан, по умолчанию используется 'ch'.
+    Указывает язык документа (повышает точность OCR, только для бэкенда pipeline).
     """,
 )
 @click.option(
@@ -1126,7 +1126,7 @@ async def run_orchestrated_cli(
     type=str,
     default=None,
     help="""
-    When the backend is `<vlm/hybrid>-http-client`, you need to specify the server_url, for example:`http://127.0.0.1:30000`
+    Если backend имеет вид `<vlm/hybrid>-http-client`, нужно указать server_url, например: `http://127.0.0.1:30000`
     """,
 )
 @click.option(
@@ -1135,7 +1135,7 @@ async def run_orchestrated_cli(
     "start_page_id",
     type=int,
     default=0,
-    help="The starting page for PDF parsing, beginning from 0.",
+    help="Начальная страница для разбора PDF (отсчёт с 0).",
 )
 @click.option(
     "-e",
@@ -1143,7 +1143,7 @@ async def run_orchestrated_cli(
     "end_page_id",
     type=int,
     default=None,
-    help="The ending page for PDF parsing, beginning from 0.",
+    help="Конечная страница для разбора PDF (отсчёт с 0).",
 )
 @click.option(
     "-f",
@@ -1151,7 +1151,7 @@ async def run_orchestrated_cli(
     "formula_enable",
     type=bool,
     default=True,
-    help="Enable formula parsing. Default is True. ",
+    help="Включить распознавание формул. По умолчанию True. ",
 )
 @click.option(
     "-t",
@@ -1159,7 +1159,7 @@ async def run_orchestrated_cli(
     "table_enable",
     type=bool,
     default=True,
-    help="Enable table parsing. Default is True. ",
+    help="Включить распознавание таблиц. По умолчанию True. ",
 )
 @click.option(
     "--image-analysis",
@@ -1167,9 +1167,9 @@ async def run_orchestrated_cli(
     type=bool,
     default=True,
     help=(
-        "Enable image/chart analysis for VLM and hybrid backends. "
-        "Hybrid medium effort automatically disables image/chart analysis. "
-        "Default is True. "
+        "Включить анализ изображений/диаграмм для бэкендов VLM и hybrid. "
+        "При hybrid effort medium анализ изображений/диаграмм отключается автоматически. "
+        "По умолчанию True. "
     ),
 )
 @click.option(
@@ -1178,8 +1178,8 @@ async def run_orchestrated_cli(
     type=bool,
     default=False,
     help=(
-        "Generate markdown and content lists locally from server-returned "
-        "middle json, images, and original files."
+        "Формировать markdown и списки содержимого локально на основе middle json, "
+        "изображений и исходных файлов, полученных от сервера."
     ),
 )
 def main(

@@ -1569,39 +1569,39 @@ app = create_app()
     context_settings=dict(ignore_unknown_options=True, allow_extra_args=True)
 )
 @click.pass_context
-@click.option("--host", default="127.0.0.1", help="Server host (default: 127.0.0.1)")
-@click.option("--port", default=8002, type=int, help="Server port (default: 8002)")
-@click.option("--reload", is_flag=True, help="Enable auto-reload (development mode)")
+@click.option("--host", default="127.0.0.1", help="Хост сервера (по умолчанию: 127.0.0.1)")
+@click.option("--port", default=8002, type=int, help="Порт сервера (по умолчанию: 8002)")
+@click.option("--reload", is_flag=True, help="Включить автоперезагрузку (режим разработки)")
 @click.option(
     "--allow-public-http-client",
     is_flag=True,
     help=(
-        "Allow *-http-client backends and server_url even when binding the router "
-        "to 0.0.0.0 or ::."
+        "Разрешить бэкенды *-http-client и server_url, даже если роутер привязан "
+        "к 0.0.0.0 или ::."
     ),
 )
 @click.option(
     "--upstream-url",
     "upstream_urls",
     multiple=True,
-    help="Existing MinerU FastAPI base URL. Repeat to add multiple upstream servers.",
+    help="Базовый URL существующего MinerU FastAPI. Повторите опцию, чтобы добавить несколько upstream-серверов.",
 )
 @click.option(
     "--local-gpus",
     default=LOCAL_GPU_AUTO,
-    help="Local GPU workers to launch: auto, none, or CSV such as 0,1,2.",
+    help="Локальные GPU-воркеры для запуска: auto, none или список через запятую, например 0,1,2.",
 )
 @click.option(
     "--worker-host",
     default="127.0.0.1",
-    help="Host for router-managed mineru-api workers (default: 127.0.0.1).",
+    help="Хост для воркеров mineru-api, управляемых роутером (по умолчанию: 127.0.0.1).",
 )
 @click.option(
     "--enable-vlm-preload",
     "enable_vlm_preload",
     type=bool,
     default=False,
-    help="Preload the local VLM model in router-managed mineru-api workers.",
+    help="Предзагружать локальную VLM-модель в воркерах mineru-api, управляемых роутером.",
 )
 def main(
     ctx: click.Context,

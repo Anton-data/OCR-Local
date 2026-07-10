@@ -1,42 +1,42 @@
 .gradio-container {
-    --mineru-accent: #f97316;
+    --mineru-accent: #64748b;
     --mineru-preview-content-height: 775px;
     --mineru-pdf-page-height: 720px;
     --mineru-markdown-text-content-height: var(--mineru-preview-content-height);
-    --mineru-panel: rgba(255, 255, 255, 0.62);
-    --mineru-panel-border: rgba(17, 24, 39, 0.10);
-    --mineru-status-panel-bg: rgba(255, 255, 255, 0.78);
+    --mineru-panel: #ffffff;
+    --mineru-panel-border: #e2e5e9;
+    --mineru-status-panel-bg: #f7f8fa;
     --mineru-status-latest-border: rgba(17, 24, 39, 0.13);
     --mineru-status-latest-text: #374151;
     --mineru-popover-border: rgba(17, 24, 39, 0.12);
-    --mineru-popover-shell-bg: rgba(255, 255, 255, 0.88);
-    --mineru-popover-card-bg: rgba(255, 255, 255, 0.96);
+    --mineru-popover-shell-bg: #ffffff;
+    --mineru-popover-card-bg: #ffffff;
     --mineru-popover-shadow: 0 18px 42px rgba(15, 23, 42, 0.18), 0 0 0 1px rgba(17, 24, 39, 0.04) inset;
     --mineru-popover-dropdown-shadow: 0 14px 30px rgba(15, 23, 42, 0.16);
 }
 @media (prefers-color-scheme: light) {
     .gradio-container {
-        --mineru-panel: rgba(255, 255, 255, 0.62);
-        --mineru-panel-border: rgba(17, 24, 39, 0.10);
-        --mineru-status-panel-bg: rgba(255, 255, 255, 0.78);
+        --mineru-panel: #ffffff;
+        --mineru-panel-border: #e2e5e9;
+        --mineru-status-panel-bg: #f7f8fa;
         --mineru-status-latest-border: rgba(17, 24, 39, 0.13);
         --mineru-status-latest-text: #374151;
         --mineru-popover-border: rgba(17, 24, 39, 0.12);
-        --mineru-popover-shell-bg: rgba(255, 255, 255, 0.88);
-        --mineru-popover-card-bg: rgba(255, 255, 255, 0.96);
+        --mineru-popover-shell-bg: #ffffff;
+        --mineru-popover-card-bg: #ffffff;
         --mineru-popover-shadow: 0 18px 42px rgba(15, 23, 42, 0.18), 0 0 0 1px rgba(17, 24, 39, 0.04) inset;
         --mineru-popover-dropdown-shadow: 0 14px 30px rgba(15, 23, 42, 0.16);
     }
 }
 body.dark .gradio-container {
-    --mineru-panel: rgba(255, 255, 255, 0.045);
-    --mineru-panel-border: rgba(255, 255, 255, 0.1);
-    --mineru-status-panel-bg: rgba(0, 0, 0, 0.18);
+    --mineru-panel: #17191d;
+    --mineru-panel-border: #2a2d33;
+    --mineru-status-panel-bg: #121418;
     --mineru-status-latest-border: var(--mineru-panel-border);
     --mineru-status-latest-text: var(--body-text-color-subdued);
     --mineru-popover-border: rgba(255, 255, 255, 0.08);
-    --mineru-popover-shell-bg: linear-gradient(135deg, rgba(255, 255, 255, 0.20), rgba(255, 255, 255, 0.05) 44%, rgba(249, 115, 22, 0.16));
-    --mineru-popover-card-bg: linear-gradient(180deg, rgba(42, 43, 48, 0.97), rgba(32, 33, 36, 0.94));
+    --mineru-popover-shell-bg: #202329;
+    --mineru-popover-card-bg: #181a1f;
     --mineru-popover-shadow: 0 18px 42px rgba(0, 0, 0, 0.34), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
     --mineru-popover-dropdown-shadow: 0 14px 30px rgba(0, 0, 0, 0.36);
 }
@@ -451,5 +451,510 @@ body.mineru-hide-hybrid-effort .gradio-container .contain .mineru-hybrid-effort-
     }
     .status-steps-list {
         grid-template-columns: 1fr;
+    }
+}
+
+/* Neutral multi-tool workspace shell */
+.gradio-container {
+    --mineru-canvas: #f4f5f7;
+    --mineru-sidebar-bg: #181a1f;
+    --mineru-sidebar-border: #292c32;
+    --mineru-sidebar-text: #f5f6f7;
+    --mineru-sidebar-muted: #9298a2;
+    width: 100% !important;
+    max-width: none !important;
+    min-height: 100vh;
+    background: var(--mineru-canvas) !important;
+    --button-primary-background-fill: #30343b !important;
+    --button-primary-background-fill-hover: #22262c !important;
+    --button-primary-border-color: #30343b !important;
+    --button-primary-text-color: #ffffff !important;
+    --primary-400: #9ca3af !important;
+    --primary-500: #6b7280 !important;
+    --primary-600: #4b5563 !important;
+    --primary-700: #374151 !important;
+    --border-color-accent: #6b7280 !important;
+    --color-accent: #4b5563 !important;
+    --color-accent-soft: rgba(100, 116, 139, 0.12) !important;
+    --slider-color: #6b7280 !important;
+}
+body.dark .gradio-container {
+    --mineru-canvas: #0f1115;
+    --mineru-sidebar-bg: #15171b;
+    --mineru-sidebar-border: #2b2e34;
+    --button-primary-background-fill: #e3e5e8 !important;
+    --button-primary-background-fill-hover: #ffffff !important;
+    --button-primary-border-color: #e3e5e8 !important;
+    --button-primary-text-color: #17191d !important;
+    --primary-400: #d1d5db !important;
+    --primary-500: #9ca3af !important;
+    --primary-600: #6b7280 !important;
+    --primary-700: #4b5563 !important;
+    --border-color-accent: #9ca3af !important;
+    --color-accent: #d1d5db !important;
+    --color-accent-soft: rgba(209, 213, 219, 0.10) !important;
+    --slider-color: #9ca3af !important;
+}
+.gradio-container .main.fillable.app {
+    width: 100% !important;
+    max-width: none !important;
+}
+.gradio-container .contain {
+    width: 100% !important;
+    max-width: none !important;
+    padding: 24px 24px 40px 260px !important;
+}
+
+.block.mineru-header-html {
+    position: fixed !important;
+    inset: 18px auto 18px 18px !important;
+    z-index: 110 !important;
+    width: 218px !important;
+    height: calc(100vh - 36px) !important;
+    min-height: 560px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+.block.mineru-header-html .html-container,
+.block.mineru-header-html .prose {
+    width: 100% !important;
+    max-width: none !important;
+    height: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+}
+.mineru-app-sidebar {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    padding: 18px 14px 14px;
+    overflow: hidden;
+    border: 1px solid var(--mineru-sidebar-border);
+    border-radius: 16px;
+    background: var(--mineru-sidebar-bg);
+    color: var(--mineru-sidebar-text);
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.12);
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.mineru-brand {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 2px 4px 20px;
+    border-bottom: 1px solid var(--mineru-sidebar-border);
+}
+.mineru-brand-mark {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    flex: none;
+    border: 1px solid #3a3e46;
+    border-radius: 10px;
+    background: #25282e;
+    color: #ffffff;
+    font-size: 16px;
+    font-weight: 750;
+    letter-spacing: -0.04em;
+}
+.mineru-brand-copy,
+.mineru-tool-copy,
+.mineru-tool-slot > span:last-child {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+}
+.mineru-brand-copy strong {
+    color: var(--mineru-sidebar-text);
+    font-size: 15px;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+}
+.mineru-brand-copy span {
+    margin-top: 2px;
+    color: var(--mineru-sidebar-muted);
+    font-size: 11px;
+    line-height: 1.3;
+}
+.mineru-tool-navigation {
+    display: flex;
+    min-height: 0;
+    flex: 1 1 auto;
+    flex-direction: column;
+    padding-top: 22px;
+}
+.mineru-sidebar-label {
+    padding: 0 8px 9px;
+    color: var(--mineru-sidebar-muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    line-height: 1.3;
+    text-transform: uppercase;
+}
+.mineru-tool-item,
+.mineru-tool-slot {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-radius: 10px;
+}
+.mineru-tool-item {
+    min-height: 54px;
+    padding: 9px 10px;
+    border: 1px solid #383c44;
+    background: #24272d;
+}
+.mineru-tool-icon {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    flex: none;
+    border-radius: 8px;
+    background: #343840;
+    color: #f2f3f5;
+}
+.mineru-tool-icon svg {
+    width: 18px;
+    height: 18px;
+}
+.mineru-tool-copy strong {
+    overflow: hidden;
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+}
+.mineru-tool-copy small {
+    margin-top: 2px;
+    color: var(--mineru-sidebar-muted);
+    font-size: 10px;
+    line-height: 1.3;
+}
+.mineru-tool-slots {
+    display: grid;
+    gap: 7px;
+    margin-top: 10px;
+}
+.mineru-tool-slot {
+    min-height: 46px;
+    padding: 7px 9px;
+    border: 1px dashed #363941;
+    color: var(--mineru-sidebar-muted);
+}
+.mineru-slot-plus {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    flex: none;
+    border-radius: 7px;
+    background: #202329;
+    color: #747b86;
+    font-size: 17px;
+    font-weight: 400;
+}
+.mineru-tool-slot strong {
+    font-size: 11px;
+    font-weight: 550;
+    line-height: 1.3;
+}
+.mineru-tool-slot small {
+    margin-top: 1px;
+    color: #666d77;
+    font-size: 9px;
+    line-height: 1.25;
+}
+.mineru-sidebar-footer {
+    display: grid;
+    gap: 11px;
+    flex: none;
+    padding: 14px 4px 2px;
+    border-top: 1px solid var(--mineru-sidebar-border);
+}
+.mineru-local-status,
+.mineru-language-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--mineru-sidebar-muted);
+    font-size: 10px;
+}
+.mineru-local-status {
+    justify-content: flex-start;
+}
+.mineru-status-indicator {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #8b939e;
+    box-shadow: 0 0 0 3px rgba(139, 147, 158, 0.11);
+}
+.mineru-language-switch {
+    display: inline-flex;
+    gap: 2px;
+    padding: 3px;
+    border: 1px solid #353941;
+    border-radius: 8px;
+    background: #202329;
+}
+.mineru-language-option {
+    min-width: 32px !important;
+    height: 26px !important;
+    margin: 0 !important;
+    padding: 0 7px !important;
+    border: 0 !important;
+    border-radius: 6px !important;
+    background: transparent !important;
+    color: #7f8792 !important;
+    font: 700 10px/26px ui-sans-serif, system-ui, sans-serif !important;
+    letter-spacing: 0.04em;
+    box-shadow: none !important;
+}
+.mineru-language-option:hover,
+.mineru-language-option:focus-visible {
+    background: #2c3037 !important;
+    color: #ffffff !important;
+    outline: none !important;
+}
+.mineru-language-option.is-active {
+    background: #e4e6e9 !important;
+    color: #181a1f !important;
+}
+
+.block.mineru-workspace-heading {
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 0 18px !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+.mineru-workspace-heading .html-container,
+.mineru-workspace-heading .prose {
+    max-width: none !important;
+    padding: 0 !important;
+}
+.mineru-workspace-intro {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+    min-height: 72px;
+    padding: 2px 3px 0;
+}
+.mineru-workspace-eyebrow {
+    margin-bottom: 6px;
+    color: var(--body-text-color-subdued);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    line-height: 1.3;
+    text-transform: uppercase;
+}
+.mineru-workspace-intro h1 {
+    margin: 0 !important;
+    color: var(--body-text-color) !important;
+    font-size: clamp(24px, 2vw, 32px) !important;
+    font-weight: 680 !important;
+    letter-spacing: -0.035em;
+    line-height: 1.1 !important;
+}
+.mineru-workspace-intro p {
+    max-width: 720px;
+    margin: 7px 0 0 !important;
+    color: var(--body-text-color-subdued) !important;
+    font-size: 13px !important;
+    line-height: 1.5 !important;
+}
+.mineru-format-list {
+    display: flex;
+    gap: 6px;
+    flex: none;
+    padding-bottom: 3px;
+}
+.mineru-format-list span {
+    padding: 5px 8px;
+    border: 1px solid var(--mineru-panel-border);
+    border-radius: 7px;
+    background: var(--mineru-panel);
+    color: var(--body-text-color-subdued);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+}
+
+.mineru-workspace-row {
+    gap: 16px !important;
+}
+.mineru-control-column,
+.mineru-preview-pane,
+.mineru-markdown-pane {
+    border-radius: 14px !important;
+    padding: 14px !important;
+    box-shadow: 0 1px 2px rgba(18, 22, 28, 0.035);
+}
+body.dark .mineru-control-column,
+body.dark .mineru-preview-pane,
+body.dark .mineru-markdown-pane {
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.025) inset;
+}
+.mineru-control-column {
+    top: 18px;
+    flex: 0 0 296px !important;
+    max-width: 320px !important;
+}
+.mineru-preview-pane,
+.mineru-markdown-pane {
+    flex: 1 1 400px !important;
+}
+.mineru-upload-file {
+    border-radius: 10px !important;
+}
+.mineru-upload-file > div,
+.mineru-upload-file .wrap {
+    border-radius: 10px !important;
+}
+.mineru-actions {
+    margin-top: 4px;
+}
+.mineru-control-column input[type="range"] {
+    accent-color: #8b939e !important;
+}
+.mineru-actions button,
+.mineru-advanced-open button,
+.mineru-advanced-open {
+    border-radius: 9px !important;
+}
+.mineru-actions button.primary,
+.mineru-actions button[class*="primary"] {
+    background: #30343b !important;
+    border-color: #30343b !important;
+    color: #ffffff !important;
+}
+body.dark .mineru-actions button.primary,
+body.dark .mineru-actions button[class*="primary"] {
+    background: #e3e5e8 !important;
+    border-color: #e3e5e8 !important;
+    color: #17191d !important;
+}
+.status-steps-panel {
+    border-radius: 10px;
+}
+.status-step.is-active .status-dot {
+    box-shadow: 0 0 0 3px rgba(100, 116, 139, 0.18);
+}
+.mineru-markdown-tabs [role="tab"][aria-selected="true"],
+.mineru-markdown-tabs button.selected {
+    border-color: #6b7280 !important;
+    color: var(--body-text-color) !important;
+}
+.office-preview-notice {
+    border-color: rgba(100, 116, 139, 0.35);
+    background: rgba(100, 116, 139, 0.08);
+}
+.office-preview-actions button {
+    border-color: rgba(100, 116, 139, 0.36);
+    background: rgba(100, 116, 139, 0.10);
+}
+.office-preview-actions button:hover {
+    background: rgba(100, 116, 139, 0.17);
+}
+[aria-label="Gradio footer navigation"] {
+    display: none !important;
+}
+
+@media (max-width: 1500px) {
+    .gradio-container .contain {
+        padding: 16px 16px 32px !important;
+    }
+    .block.mineru-header-html {
+        position: static !important;
+        width: 100% !important;
+        height: auto !important;
+        min-height: 0 !important;
+        margin: 0 0 20px !important;
+    }
+    .mineru-app-sidebar {
+        display: grid;
+        grid-template-columns: auto minmax(220px, 1fr) auto;
+        align-items: center;
+        gap: 18px;
+        height: auto;
+        padding: 10px 12px;
+        border-radius: 13px;
+    }
+    .mineru-brand {
+        padding: 0;
+        border: 0;
+    }
+    .mineru-tool-navigation {
+        display: block;
+        padding: 0;
+    }
+    .mineru-sidebar-label,
+    .mineru-tool-slots,
+    .mineru-local-status,
+    .mineru-language-label {
+        display: none;
+    }
+    .mineru-tool-item {
+        width: max-content;
+        min-height: 42px;
+        margin: 0 auto;
+        padding: 5px 9px;
+    }
+    .mineru-tool-icon {
+        width: 28px;
+        height: 28px;
+    }
+    .mineru-sidebar-footer {
+        display: block;
+        padding: 0;
+        border: 0;
+    }
+    .mineru-language-row {
+        display: block;
+    }
+    .mineru-control-column {
+        top: 12px;
+    }
+}
+
+@media (max-width: 720px) {
+    .mineru-app-sidebar {
+        grid-template-columns: auto 1fr auto;
+        gap: 10px;
+    }
+    .mineru-brand-copy span,
+    .mineru-tool-copy small,
+    .mineru-format-list {
+        display: none;
+    }
+    .mineru-tool-item {
+        min-width: 0;
+        width: 100%;
+        justify-content: center;
+    }
+    .mineru-workspace-intro {
+        min-height: 0;
+    }
+    .mineru-workspace-intro h1 {
+        font-size: 24px !important;
+    }
+    .mineru-control-column {
+        max-width: none !important;
+        flex-basis: 100% !important;
     }
 }

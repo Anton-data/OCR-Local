@@ -97,7 +97,7 @@ def temporary_model_source(model_source):
     'model_source',
     type=click.Choice(REMOTE_MODEL_SOURCES),
     help="""
-        The source of the model repository. 
+        Источник репозитория моделей.
         """,
     default=None,
 )
@@ -107,14 +107,14 @@ def temporary_model_source(model_source):
     'model_type',
     type=click.Choice(['pipeline', 'vlm', 'all']),
     help="""
-        The type of the model to download.
+        Тип модели для загрузки.
         """,
     default=None,
 )
 def download_models(model_source, model_type):
-    """Download MinerU model files.
+    """Загрузить файлы моделей MinerU.
 
-    Supports downloading pipeline or VLM models from ModelScope or HuggingFace.
+    Поддерживает загрузку моделей pipeline или VLM с ModelScope или Hugging Face.
     """
     # 如果未显式指定则交互式输入下载来源
     if model_source is None:
