@@ -708,4 +708,206 @@
             positionAdvancedDropdowns();
         }
     });
+
+    const EDITOR_ZOOM_SCRIPT_VERSION = "editor-zoom-v2";
+    if (window.__mineruEditorZoomInstalled !== EDITOR_ZOOM_SCRIPT_VERSION) {
+        window.__mineruEditorZoomInstalled = EDITOR_ZOOM_SCRIPT_VERSION;
+
+        const EDITOR_ZOOM_MIN = 1;
+        const EDITOR_ZOOM_MAX = 4;
+        const EDITOR_PAN_CLICK_THRESHOLD = 5; // px — ниже этого считаем кликом, не паном
+        let editorZoomState = { scale: 1, tx: 0, ty: 0 };
+        let editorPanState = null;
+
+        const findEditorPageEl = (target) => (target && target.closest ? target.closest(".mineru-editor-page") : null);
+
+        const applyEditorZoomVars = (container) => {
+            container.style.setProperty("--mineru-ez-scale", String(editorZoomState.scale));
+            container.style.setProperty("--mineru-ez-tx", `${editorZoomState.tx}px`);
+            container.style.setProperty("--mineru-ez-ty", `${editorZoomState.ty}px`);
+        };
+
+        const resetEditorZoom = () => {
+            editorZoomState = { scale: 1, tx: 0, ty: 0 };
+            document.querySelectorAll(".mineru-editor-page").forEach(applyEditorZoomVars);
+        };
+
+        const zoomEditorAt = (container, clientX, clientY, nextScaleRaw) => {
+            const nextScale = Math.min(EDITOR_ZOOM_MAX, Math.max(EDITOR_ZOOM_MIN, nextScaleRaw));
+            const rect = container.getBoundingClientRect();
+            const originX = clientX - rect.left;
+            const originY = clientY - rect.top;
+            const prevScale = editorZoomState.scale;
+            const localX = (originX - editorZoomState.tx) / prevScale;
+            const localY = (originY - editorZoomState.ty) / prevScale;
+            editorZoomState = {
+                scale: nextScale,
+                tx: originX - localX * nextScale,
+                ty: originY - localY * nextScale,
+            };
+            if (nextScale <= EDITOR_ZOOM_MIN) {
+                editorZoomState.tx = 0;
+                editorZoomState.ty = 0;
+            }
+            applyEditorZoomVars(container);
+        };
+
+        window.mineruEditorZoomIn = () => {
+            const container = document.querySelector(".mineru-editor-page");
+            if (!container) return;
+            const rect = container.getBoundingClientRect();
+            zoomEditorAt(container, rect.left + rect.width / 2, rect.top + rect.height / 2, editorZoomState.scale * 1.3);
+        };
+        window.mineruEditorZoomOut = () => {
+            const container = document.querySelector(".mineru-editor-page");
+            if (!container) return;
+            const rect = container.getBoundingClientRect();
+            zoomEditorAt(container, rect.left + rect.width / 2, rect.top + rect.height / 2, editorZoomState.scale / 1.3);
+        };
+        window.mineruEditorZoomFit = () => resetEditorZoom();
+        window.mineruEditorZoomActual = () => {
+            const container = document.querySelector(".mineru-editor-page");
+            if (!container) return;
+            const rect = container.getBoundingClientRect();
+            zoomEditorAt(container, rect.left + rect.width / 2, rect.top + rect.height / 2, 2);
+        };
+
+        document.addEventListener("wheel", (event) => {
+            const container = findEditorPageEl(event.target);
+            if (!container) return;
+            event.preventDefault();
+            const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+            zoomEditorAt(container, event.clientX, event.clientY, editorZoomState.scale * factor);
+        }, { passive: false });
+
+        document.addEventListener("pointerdown", (event) => {
+            const container = findEditorPageEl(event.target);
+            if (!container || event.button !== 0) return;
+            editorPanState = {
+                startX: event.clientX,
+                startY: event.clientY,
+                startTx: editorZoomState.tx,
+                startTy: editorZoomState.ty,
+                moved: false,
+                pointerId: event.pointerId,
+                container,
+            };
+            if (container.setPointerCapture) {
+                try { container.setPointerCapture(event.pointerId); } catch (e) { /* ignore */ }
+            }
+            container.classList.add("mineru-ez-panning");
+        });
+
+        document.addEventListener("pointermove", (event) => {
+            if (!editorPanState || event.pointerId !== editorPanState.pointerId) return;
+            const dx = event.clientX - editorPanState.startX;
+            const dy = event.clientY - editorPanState.startY;
+            if (!editorPanState.moved && Math.hypot(dx, dy) > EDITOR_PAN_CLICK_THRESHOLD) {
+                editorPanState.moved = true;
+            }
+            if (editorPanState.moved) {
+                editorZoomState.tx = editorPanState.startTx + dx;
+                editorZoomState.ty = editorPanState.startTy + dy;
+                applyEditorZoomVars(editorPanState.container);
+            }
+        });
+
+        const endEditorPan = (event) => {
+            if (!editorPanState || (event.pointerId !== undefined && event.pointerId !== editorPanState.pointerId)) return;
+            editorPanState.container.classList.remove("mineru-ez-panning");
+            if (editorPanState.moved) {
+                editorPanState.container.__mineruSuppressNextClick = true;
+            }
+            editorPanState = null;
+        };
+        document.addEventListener("pointerup", endEditorPan);
+        document.addEventListener("pointercancel", endEditorPan);
+
+        document.addEventListener("click", (event) => {
+            if (event.defaultPrevented) return;
+            const container = findEditorPageEl(event.target);
+            if (container && container.__mineruSuppressNextClick) {
+                container.__mineruSuppressNextClick = false;
+                event.stopPropagation();
+                event.preventDefault();
+            }
+        }, true); // capture — раньше внутреннего click-обработчика Gradio Image .select()
+
+        // Gradio 6 периодически не испускает Image.select() для уже
+        // отрендеренного сервером изображения. Сохраняем координаты локально,
+        // а обычная Button.click() передаёт их серверному обработчику через js=.
+        const showEditorBlockPending = (container, image, clientX, clientY) => {
+            document.querySelectorAll(".mineru-editor-pending-marker").forEach((marker) => marker.remove());
+            if (window.__mineruEditorPendingMarkerTimer) {
+                window.clearTimeout(window.__mineruEditorPendingMarkerTimer);
+            }
+            const containerRect = container.getBoundingClientRect();
+            const marker = document.createElement("div");
+            marker.className = "mineru-editor-pending-marker";
+            marker.style.left = `${clientX - containerRect.left}px`;
+            marker.style.top = `${clientY - containerRect.top}px`;
+            container.append(marker);
+            window.__mineruEditorPendingMarkerTimer = window.setTimeout(() => marker.remove(), 15000);
+            image.addEventListener("load", () => marker.remove(), { once: true });
+
+            const statusRoot = document.querySelector("#mineru-editor-status");
+            const statusTarget = statusRoot?.querySelector(".html-container, .prose") || statusRoot;
+            if (statusTarget) {
+                statusTarget.innerHTML = (
+                    '<div class="mineru-editor-pending-status">'
+                    + '<span class="mineru-editor-pending-spinner" aria-hidden="true"></span>'
+                    + '<span>Загрузка выбранного блока…</span>'
+                    + '</div>'
+                );
+            }
+        };
+        document.addEventListener("click", (event) => {
+            if (event.defaultPrevented) return;
+            const container = findEditorPageEl(event.target);
+            const image = container && (
+                (event.target instanceof Element ? event.target.closest("img") : null)
+                || container.querySelector("img")
+            );
+            if (!container || !image || !container.contains(image)) return;
+            const rect = image.getBoundingClientRect();
+            if (!rect.width || !rect.height || !image.naturalWidth || !image.naturalHeight) return;
+            // <img> занимает всю высоту редактора, а сама страница внутри него
+            // рисуется через object-fit: contain. Считаем не от внешнего rect,
+            // а от фактической области пикселей документа; иначе в верхнем и
+            // нижнем пустом поле выбирается блок с неверной координатой Y.
+            const displayScale = Math.min(
+                rect.width / image.naturalWidth,
+                rect.height / image.naturalHeight,
+            );
+            const renderedWidth = image.naturalWidth * displayScale;
+            const renderedHeight = image.naturalHeight * displayScale;
+            const renderedLeft = rect.left + (rect.width - renderedWidth) / 2;
+            const renderedTop = rect.top + (rect.height - renderedHeight) / 2;
+            const x = (event.clientX - renderedLeft) / displayScale;
+            const y = (event.clientY - renderedTop) / displayScale;
+            if (x < 0 || y < 0 || x > image.naturalWidth || y > image.naturalHeight) return;
+            const trigger = document.querySelector("#mineru-editor-select-trigger button, #mineru-editor-select-trigger");
+            if (!trigger) return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            showEditorBlockPending(container, image, event.clientX, event.clientY);
+            window.__mineruEditorClickXY = JSON.stringify({ x, y });
+            window.setTimeout(() => trigger.click(), 0);
+        }, true);
+
+        document.addEventListener("keydown", (event) => {
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            const active = document.activeElement;
+            const activeTag = active && active.tagName;
+            if (activeTag === "INPUT" || activeTag === "TEXTAREA" || (active && active.isContentEditable)) return;
+            const editorPage = document.querySelector(".mineru-editor-page");
+            if (!editorPage || editorPage.offsetParent === null) return; // редактор скрыт
+            const targetSelector = event.key === "ArrowLeft" ? ".mineru-editor-prev" : ".mineru-editor-next";
+            const targetButton = document.querySelector(targetSelector);
+            if (targetButton) {
+                event.preventDefault();
+                targetButton.click();
+            }
+        });
+    }
 }

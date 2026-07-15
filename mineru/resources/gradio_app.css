@@ -200,17 +200,17 @@ body.mineru-hide-hybrid-effort .gradio-container .contain .mineru-hybrid-effort-
 .mineru-markdown-pane {
     min-width: 340px;
 }
-.mineru-preview-pane > .block {
+.mineru-preview-pane .block:not(.mineru-editor-group .block):not(.mineru-editor-group) {
     height: calc(var(--mineru-preview-content-height) + 48px) !important;
     max-height: calc(var(--mineru-preview-content-height) + 48px) !important;
     overflow: hidden !important;
     resize: none !important;
 }
-.mineru-preview-pane > .block,
+.mineru-preview-pane .block:not(.mineru-editor-group .block):not(.mineru-editor-group),
 .mineru-markdown-output {
     min-height: var(--mineru-preview-content-height);
 }
-.mineru-preview-pane > .block.mineru-office-preview-html {
+.mineru-preview-pane .block.mineru-office-preview-html {
     height: calc(var(--mineru-preview-content-height) + 48px) !important;
     max-height: calc(var(--mineru-preview-content-height) + 48px) !important;
     min-height: var(--mineru-preview-content-height) !important;
@@ -266,6 +266,9 @@ body.mineru-hide-hybrid-effort .gradio-container .contain .mineru-hybrid-effort-
     max-width: none !important;
 }
 .mineru-markdown-tabs .tab-nav {
+    border-bottom-color: var(--mineru-panel-border);
+}
+.mineru-preview-tabs .tab-nav {
     border-bottom-color: var(--mineru-panel-border);
 }
 .mineru-markdown-tabs textarea {
@@ -856,7 +859,9 @@ body.dark .mineru-actions button[class*="primary"] {
     box-shadow: 0 0 0 3px rgba(100, 116, 139, 0.18);
 }
 .mineru-markdown-tabs [role="tab"][aria-selected="true"],
-.mineru-markdown-tabs button.selected {
+.mineru-markdown-tabs button.selected,
+.mineru-preview-tabs [role="tab"][aria-selected="true"],
+.mineru-preview-tabs button.selected {
     border-color: #6b7280 !important;
     color: var(--body-text-color) !important;
 }
@@ -956,5 +961,162 @@ body.dark .mineru-actions button[class*="primary"] {
     .mineru-control-column {
         max-width: none !important;
         flex-basis: 100% !important;
+    }
+}
+
+.mineru-editor-block-panel {
+    margin-top: 0;
+    padding: 14px;
+    border: 1px solid var(--mineru-panel-border);
+    border-radius: 10px;
+    background: var(--mineru-status-panel-bg);
+}
+.mineru-editor-block-panel-title {
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--body-text-color);
+}
+.mineru-editor-block-snippet {
+    max-height: 220px;
+    overflow: hidden;
+    border: 1px solid var(--mineru-panel-border);
+    border-radius: 8px;
+    margin-bottom: 10px;
+    background: var(--mineru-status-panel-bg);
+}
+.mineru-editor-block-snippet img {
+    max-height: 220px;
+    width: auto;
+    max-width: 100%;
+    object-fit: contain;
+    margin: 0 auto;
+    display: block;
+}
+.mineru-editor-block-panel .mineru-editor-deselect {
+    margin-left: auto;
+}
+.mineru-editor-block-panel > .row:has(.mineru-editor-deselect) {
+    display: flex;
+    align-items: center;
+}
+
+.mineru-editor-exports-row {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--mineru-panel-border);
+    align-items: center !important;
+    justify-content: space-between !important;
+    flex-wrap: wrap !important;
+    gap: 10px !important;
+}
+.mineru-editor-dirty-hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(100, 116, 139, 0.35);
+    background: rgba(100, 116, 139, 0.12);
+    font-size: 12px;
+    color: var(--body-text-color-subdued);
+}
+.mineru-editor-thumbnails-accordion {
+    margin-bottom: 10px;
+}
+.mineru-editor-thumbnails {
+    max-height: 220px;
+}
+.mineru-editor-status {
+    font-size: 13px;
+    color: var(--body-text-color-subdued);
+}
+.mineru-editor-pending-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--body-text-color-subdued);
+}
+.mineru-editor-pending-spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(148, 163, 184, 0.3);
+    border-top-color: #60a5fa;
+    border-radius: 50%;
+    animation: mineru-editor-spin 0.7s linear infinite;
+}
+@keyframes mineru-editor-spin {
+    to { transform: rotate(360deg); }
+}
+.mineru-editor-page {
+    height: var(--mineru-preview-content-height);
+    max-height: var(--mineru-preview-content-height);
+    overflow: hidden;
+    position: relative;
+    isolation: isolate;
+    touch-action: none;
+    cursor: grab;
+    user-select: none;
+}
+.mineru-editor-pending-marker {
+    position: absolute;
+    width: 28px;
+    height: 28px;
+    margin: -14px 0 0 -14px;
+    border: 3px solid #dc2626;
+    border-radius: 6px;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.8), 0 0 12px rgba(220, 38, 38, 0.8);
+    pointer-events: none;
+    z-index: 20;
+    animation: mineru-editor-pending-pulse 0.8s ease-in-out infinite alternate;
+}
+@keyframes mineru-editor-pending-pulse {
+    to { transform: scale(1.2); }
+}
+.mineru-editor-workspace {
+    align-items: flex-start !important;
+    gap: 14px !important;
+}
+.mineru-editor-canvas,
+.mineru-editor-side {
+    min-width: 0 !important;
+}
+.mineru-editor-side {
+    position: sticky;
+    top: 12px;
+}
+.mineru-editor-click-hint {
+    margin: 8px 0 12px;
+    padding: 8px 10px;
+    border-left: 3px solid var(--color-accent, #3b82f6);
+    border-radius: 6px;
+    background: var(--mineru-status-panel-bg);
+    color: var(--body-text-color-subdued);
+    font-size: 13px;
+}
+#mineru-editor-select-trigger {
+    display: none !important;
+}
+.mineru-editor-page.mineru-ez-panning {
+    cursor: grabbing;
+}
+.mineru-editor-page img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    transform: translate(var(--mineru-ez-tx, 0px), var(--mineru-ez-ty, 0px)) scale(var(--mineru-ez-scale, 1));
+    transform-origin: 0 0;
+    will-change: transform;
+}
+@media (max-width: 980px) {
+    .mineru-editor-workspace {
+        flex-direction: column !important;
+    }
+    .mineru-editor-canvas,
+    .mineru-editor-side {
+        width: 100% !important;
+        flex-basis: 100% !important;
+    }
+    .mineru-editor-side {
+        position: static;
     }
 }

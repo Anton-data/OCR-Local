@@ -62,6 +62,8 @@ from mineru.cli.vlm_preload import (
 from mineru.backend.vlm.vlm_analyze import shutdown_cached_models
 from mineru.utils.cli_parser import arg_parse
 from mineru.utils.check_sys_env import is_mac_environment
+from mineru.utils.docx_export import export_docx_from_result_dir
+from mineru.utils.searchable_pdf import export_searchable_pdf_from_result_dir
 from mineru.utils.config_reader import (
     get_max_concurrent_requests as read_max_concurrent_requests,
     get_processing_window_size,
@@ -605,6 +607,73 @@ def create_result_zip(
     return zip_path
 
 
+def export_docx_for_task_files(
+    output_dir: str,
+    pdf_file_names: list[str],
+    backend: str,
+    parse_method: str,
+) -> dict[str, str]:
+    """Export a .docx file for each parsed document of a task.
+
+    Returns a mapping ``pdf_name -> docx_path`` containing only the documents
+    for which a ``content_list.json`` was found and the export succeeded; a
+    failure for one document (missing content list, corrupted image, etc.)
+    never aborts the others.
+    """
+    docx_paths: dict[str, str] = {}
+    for pdf_name in pdf_file_names:
+        try:
+            parse_dir = get_parse_dir(output_dir, pdf_name, backend, parse_method)
+        except ValueError:
+            logger.warning(f"Unknown backend type: {backend}, skipping DOCX export for {pdf_name}")
+            continue
+
+        if not os.path.exists(parse_dir):
+            continue
+
+        try:
+            docx_paths[pdf_name] = str(export_docx_from_result_dir(parse_dir))
+        except FileNotFoundError as exc:
+            logger.warning(f"No content_list.json for {pdf_name}, skipping DOCX export: {exc}")
+        except Exception as exc:
+            logger.exception(f"Failed to export DOCX for {pdf_name}: {exc}")
+    return docx_paths
+
+
+def export_pdf_for_task_files(
+    output_dir: str,
+    pdf_file_names: list[str],
+    backend: str,
+    parse_method: str,
+) -> dict[str, str]:
+    """Export a searchable PDF (image page + invisible recognised-text layer)
+    for each parsed document of a task.
+
+    Returns a mapping ``pdf_name -> pdf_path`` containing only the documents
+    for which both a ``middle.json`` and the original PDF were found on disk
+    and the export succeeded; a failure for one document (missing files,
+    corrupted page, etc.) never aborts the others.
+    """
+    pdf_paths: dict[str, str] = {}
+    for pdf_name in pdf_file_names:
+        try:
+            parse_dir = get_parse_dir(output_dir, pdf_name, backend, parse_method)
+        except ValueError:
+            logger.warning(f"Unknown backend type: {backend}, skipping searchable PDF export for {pdf_name}")
+            continue
+
+        if not os.path.exists(parse_dir):
+            continue
+
+        try:
+            pdf_paths[pdf_name] = str(export_searchable_pdf_from_result_dir(parse_dir))
+        except FileNotFoundError as exc:
+            logger.warning(f"No middle.json/original PDF for {pdf_name}, skipping searchable PDF export: {exc}")
+        except Exception as exc:
+            logger.exception(f"Failed to export searchable PDF for {pdf_name}: {exc}")
+    return pdf_paths
+
+
 def _cleanup_generated_zip_task(task: asyncio.Task[str]) -> None:
     try:
         generated_zip_path = task.result()
@@ -844,12 +913,17 @@ async def run_parse_job(
         f_draw_layout_bbox=False,
         f_draw_span_bbox=False,
         f_dump_md=request_options.return_md,
-        f_dump_middle_json=request_options.return_middle_json,
+        # Always persist *_middle.json and *_origin.pdf to disk (independent of
+        # the return_middle_json / return_original_file request flags, which
+        # only control whether that data is *returned* in the /tasks and
+        # /file_parse response bodies -- see build_result_dict/create_result_zip).
+        # GET /tasks/{task_id}/export_docx relies on *_content_list.json and GET
+        # /tasks/{task_id}/export_pdf relies on *_middle.json + *_origin.pdf
+        # existing on disk regardless of which flags the task was submitted with.
+        f_dump_middle_json=True,
         f_dump_model_output=request_options.return_model_output,
-        f_dump_orig_pdf=(
-            request_options.return_original_file and request_options.response_format_zip
-        ),
-        f_dump_content_list=request_options.return_content_list,
+        f_dump_orig_pdf=True,
+        f_dump_content_list=True,
         start_page_id=request_options.start_page_id,
         end_page_id=request_options.end_page_id,
         client_side_output_generation=getattr(
@@ -1346,6 +1420,154 @@ async def get_async_task_result(
         response_format_zip=task.response_format_zip,
         return_original_file=task.return_original_file,
         zip_filename=f"{task.task_id}.zip",
+    )
+
+
+@app.get(
+    path="/tasks/{task_id}/export_docx",
+    name="get_async_task_export_docx",
+    summary="Export a completed task's result as a Word (.docx) document",
+    description=(
+        "Build a .docx file from the content_list.json produced for a completed "
+        "task and return it. If the task parsed a single file, a single .docx is "
+        "returned; if it parsed multiple files, a .zip archive of .docx files is "
+        "returned instead."
+    ),
+)
+async def get_async_task_export_docx(
+    task_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+):
+    task_manager = get_task_manager()
+    task = task_manager.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if task.status in (TASK_PENDING, TASK_PROCESSING):
+        return JSONResponse(
+            status_code=202,
+            content={
+                **task.to_status_payload(request),
+                "message": "Task result is not ready yet",
+            },
+        )
+
+    if task.status == TASK_FAILED:
+        return JSONResponse(
+            status_code=409,
+            content={
+                **task.to_status_payload(request),
+                "message": "Task execution failed",
+            },
+        )
+
+    docx_paths = await asyncio.to_thread(
+        export_docx_for_task_files,
+        output_dir=task.output_dir,
+        pdf_file_names=task.file_names,
+        backend=task.backend,
+        parse_method=task.parse_method,
+    )
+    if not docx_paths:
+        raise HTTPException(
+            status_code=404,
+            detail="No content_list.json found to export as DOCX for this task",
+        )
+
+    if len(docx_paths) == 1:
+        (docx_path,) = docx_paths.values()
+        return FileResponse(
+            path=docx_path,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            filename=Path(docx_path).name,
+        )
+
+    zip_fd, zip_path = tempfile.mkstemp(suffix=".zip", prefix="mineru_docx_")
+    os.close(zip_fd)
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for pdf_name, docx_path in docx_paths.items():
+            zf.write(docx_path, arcname=f"{pdf_name}.docx")
+    background_tasks.add_task(cleanup_file, zip_path)
+    return FileResponse(
+        path=zip_path,
+        media_type="application/zip",
+        filename=f"{task_id}_docx.zip",
+    )
+
+
+@app.get(
+    path="/tasks/{task_id}/export_pdf",
+    name="get_async_task_export_pdf",
+    summary="Export a completed task's result as a searchable PDF",
+    description=(
+        "Build a searchable PDF from the middle.json produced for a completed "
+        "task, overlaying an invisible recognised-text layer on top of the "
+        "original page images (this also 'repairs' PDFs whose embedded text "
+        "layer was corrupted, since the old text layer is discarded). If the "
+        "task parsed a single file, a single PDF is returned; if it parsed "
+        "multiple files, a .zip archive of PDFs is returned instead."
+    ),
+)
+async def get_async_task_export_pdf(
+    task_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+):
+    task_manager = get_task_manager()
+    task = task_manager.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if task.status in (TASK_PENDING, TASK_PROCESSING):
+        return JSONResponse(
+            status_code=202,
+            content={
+                **task.to_status_payload(request),
+                "message": "Task result is not ready yet",
+            },
+        )
+
+    if task.status == TASK_FAILED:
+        return JSONResponse(
+            status_code=409,
+            content={
+                **task.to_status_payload(request),
+                "message": "Task execution failed",
+            },
+        )
+
+    pdf_paths = await asyncio.to_thread(
+        export_pdf_for_task_files,
+        output_dir=task.output_dir,
+        pdf_file_names=task.file_names,
+        backend=task.backend,
+        parse_method=task.parse_method,
+    )
+    if not pdf_paths:
+        raise HTTPException(
+            status_code=404,
+            detail="No middle.json/original PDF found to export as searchable PDF for this task",
+        )
+
+    if len(pdf_paths) == 1:
+        (pdf_path,) = pdf_paths.values()
+        return FileResponse(
+            path=pdf_path,
+            media_type="application/pdf",
+            filename=Path(pdf_path).name,
+        )
+
+    zip_fd, zip_path = tempfile.mkstemp(suffix=".zip", prefix="mineru_searchable_pdf_")
+    os.close(zip_fd)
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for pdf_name, pdf_path in pdf_paths.items():
+            zf.write(pdf_path, arcname=f"{pdf_name}.pdf")
+    background_tasks.add_task(cleanup_file, zip_path)
+    return FileResponse(
+        path=zip_path,
+        media_type="application/zip",
+        filename=f"{task_id}_searchable_pdf.zip",
     )
 
 

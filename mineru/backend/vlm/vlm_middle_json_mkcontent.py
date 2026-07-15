@@ -363,7 +363,13 @@ def mk_blocks_to_markdown(para_blocks, make_mode, formula_enable, table_enable, 
     for para_block in para_blocks:
         para_text = ''
         para_type = para_block['type']
-        if para_type in [BlockType.TEXT, BlockType.INTERLINE_EQUATION, BlockType.PHONETIC, BlockType.REF_TEXT]:
+        if para_type in [
+            BlockType.TEXT,
+            BlockType.HEADER,
+            BlockType.INTERLINE_EQUATION,
+            BlockType.PHONETIC,
+            BlockType.REF_TEXT,
+        ]:
             para_text = merge_para_with_text(para_block, formula_enable=formula_enable, img_buket_path=img_buket_path)
         elif para_type == BlockType.LIST:
             for block in para_block['blocks']:
@@ -898,7 +904,7 @@ def union_make(pdf_info_dict: list,
     table_enable = get_table_enable(os.getenv('MINERU_VLM_TABLE_ENABLE', 'True').lower() == 'true')
 
     output_content = []
-    for page_info in pdf_info_dict:
+    for page_position, page_info in enumerate(pdf_info_dict):
         paras_of_layout = page_info.get('para_blocks')
         paras_of_discarded = page_info.get('discarded_blocks')
         page_idx = page_info.get('page_idx')
@@ -906,7 +912,25 @@ def union_make(pdf_info_dict: list,
         if make_mode in [MakeMode.MM_MD, MakeMode.NLP_MD]:
             if not paras_of_layout:
                 continue
-            page_markdown = mk_blocks_to_markdown(paras_of_layout, make_mode, formula_enable, table_enable, img_buket_path)
+            # Header/footer zones are normally excluded from Markdown because they
+            # often repeat on every page.  A letterhead on the first page is
+            # document content, though, and users must be able to retain and edit
+            # it. Include first-page headers while continuing to omit repeated
+            # headers on subsequent pages and all footers/page numbers.
+            first_page_headers = []
+            if page_position == 0:
+                first_page_headers = [
+                    block
+                    for block in (paras_of_discarded or [])
+                    if block.get("type") == BlockType.HEADER
+                ]
+            page_markdown = mk_blocks_to_markdown(
+                first_page_headers + paras_of_layout,
+                make_mode,
+                formula_enable,
+                table_enable,
+                img_buket_path,
+            )
             output_content.extend(page_markdown)
         elif make_mode == MakeMode.CONTENT_LIST:
             para_blocks = (paras_of_layout or []) + (paras_of_discarded or [])

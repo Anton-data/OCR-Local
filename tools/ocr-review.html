@@ -1,0 +1,1248 @@
+<title>OCR-редактор — звірка розпізнаного тексту зі сканом</title>
+<style>
+  :root {
+    --bg: #F4F7FA;
+    --surface: #FFFFFF;
+    --surface-alt: #EAEFF4;
+    --border: #D2DBE4;
+    --border-strong: #B3C0CE;
+    --text: #1A2333;
+    --text-muted: #566072;
+    --text-faint: #7C8798;
+    --accent: #2E6C9E;
+    --accent-strong: #1F5580;
+    --accent-contrast: #FFFFFF;
+    --accent-tint: rgba(46, 108, 158, 0.08);
+    --accent-tint-strong: rgba(46, 108, 158, 0.16);
+    --edited: #A9701F;
+    --edited-tint: rgba(169, 112, 31, 0.10);
+    --edited-tint-strong: rgba(169, 112, 31, 0.20);
+    --danger: #A5405A;
+    --danger-tint: rgba(165, 64, 90, 0.10);
+    --shadow: 0 1px 2px rgba(20, 30, 45, 0.06), 0 4px 12px rgba(20, 30, 45, 0.05);
+    --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Mono", "Consolas", "SFMono-Regular", Menlo, monospace;
+    --radius: 8px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #10151E;
+      --surface: #171F2B;
+      --surface-alt: #1E2734;
+      --border: #2C3849;
+      --border-strong: #3C4C61;
+      --text: #E7ECF3;
+      --text-muted: #9AA7BA;
+      --text-faint: #78859A;
+      --accent: #6FA8D8;
+      --accent-strong: #8EBEE6;
+      --accent-contrast: #0B1420;
+      --accent-tint: rgba(111, 168, 216, 0.12);
+      --accent-tint-strong: rgba(111, 168, 216, 0.22);
+      --edited: #D9A054;
+      --edited-tint: rgba(217, 160, 84, 0.14);
+      --edited-tint-strong: rgba(217, 160, 84, 0.26);
+      --danger: #E38DA0;
+      --danger-tint: rgba(227, 141, 160, 0.14);
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.35);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #10151E;
+    --surface: #171F2B;
+    --surface-alt: #1E2734;
+    --border: #2C3849;
+    --border-strong: #3C4C61;
+    --text: #E7ECF3;
+    --text-muted: #9AA7BA;
+    --text-faint: #78859A;
+    --accent: #6FA8D8;
+    --accent-strong: #8EBEE6;
+    --accent-contrast: #0B1420;
+    --accent-tint: rgba(111, 168, 216, 0.12);
+    --accent-tint-strong: rgba(111, 168, 216, 0.22);
+    --edited: #D9A054;
+    --edited-tint: rgba(217, 160, 84, 0.14);
+    --edited-tint-strong: rgba(217, 160, 84, 0.26);
+    --danger: #E38DA0;
+    --danger-tint: rgba(227, 141, 160, 0.14);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.35);
+  }
+
+  :root[data-theme="light"] {
+    --bg: #F4F7FA;
+    --surface: #FFFFFF;
+    --surface-alt: #EAEFF4;
+    --border: #D2DBE4;
+    --border-strong: #B3C0CE;
+    --text: #1A2333;
+    --text-muted: #566072;
+    --text-faint: #7C8798;
+    --accent: #2E6C9E;
+    --accent-strong: #1F5580;
+    --accent-contrast: #FFFFFF;
+    --accent-tint: rgba(46, 108, 158, 0.08);
+    --accent-tint-strong: rgba(46, 108, 158, 0.16);
+    --edited: #A9701F;
+    --edited-tint: rgba(169, 112, 31, 0.10);
+    --edited-tint-strong: rgba(169, 112, 31, 0.20);
+    --danger: #A5405A;
+    --danger-tint: rgba(165, 64, 90, 0.10);
+    --shadow: 0 1px 2px rgba(20, 30, 45, 0.06), 0 4px 12px rgba(20, 30, 45, 0.05);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  body { overflow-x: hidden; }
+
+  h1, h2 { text-wrap: balance; margin: 0; }
+
+  button, select, input, textarea { font-family: inherit; font-size: inherit; color: inherit; }
+
+  .app {
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 20px 20px 40px;
+  }
+
+  .app-header {
+    padding-bottom: 16px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .app-header h1 {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  .app-header .subtitle {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 13px;
+    max-width: 62ch;
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.7fr) minmax(300px, 1fr);
+    gap: 18px;
+    align-items: start;
+  }
+
+  @media (max-width: 960px) {
+    .layout { grid-template-columns: 1fr; }
+    .editor-col { position: static; max-height: none; }
+  }
+
+  .viewer-col, .editor-col {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .editor-col {
+    position: sticky;
+    top: 16px;
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    padding-right: 2px;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 14px 16px;
+  }
+
+  /* --- Toolbar --- */
+  .file-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .file-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1 1 220px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .file-field input[type="file"] {
+    font-size: 12px;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: normal;
+    color: var(--text);
+    background: var(--surface-alt);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 8px;
+  }
+
+  .file-field input[type="file"]::file-selector-button {
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent-contrast);
+    background: var(--accent);
+    border: none;
+    border-radius: 5px;
+    padding: 5px 10px;
+    margin-right: 8px;
+    cursor: pointer;
+  }
+
+  .file-field input[type="file"]::file-selector-button:hover { background: var(--accent-strong); }
+
+  .status-line {
+    margin: 10px 0 0;
+    font-size: 12.5px;
+    color: var(--text-muted);
+  }
+
+  .mapping { margin-top: 10px; }
+
+  .mapping summary {
+    cursor: pointer;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--accent);
+    padding: 2px 0;
+  }
+
+  .mapping-list {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+
+  .mapping-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+    align-items: center;
+    font-size: 12.5px;
+  }
+
+  .mapping-row .page-label { color: var(--text-muted); }
+
+  .mapping-row select {
+    background: var(--surface-alt);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 4px 6px;
+    min-width: 0;
+  }
+
+  /* --- Nav bar --- */
+  .nav-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  .nav-bar select {
+    flex: 1 1 auto;
+    background: var(--surface-alt);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    min-width: 0;
+  }
+
+  .icon-btn {
+    background: var(--surface-alt);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text);
+    flex: 0 0 auto;
+  }
+
+  .icon-btn:hover { background: var(--accent-tint); border-color: var(--accent); }
+  .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .zoom-field {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-muted);
+    flex: 0 0 auto;
+  }
+
+  .zoom-field select {
+    background: var(--surface-alt);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 6px;
+  }
+
+  /* --- Viewer --- */
+  .viewer-frame {
+    background: var(--surface-alt);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: auto;
+    min-height: 420px;
+    max-height: 78vh;
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-start;
+    position: relative;
+  }
+
+  .empty-state {
+    margin: auto;
+    padding: 40px 24px;
+    color: var(--text-faint);
+    font-size: 13px;
+    text-align: center;
+    max-width: 40ch;
+  }
+
+  .empty-state.small { padding: 10px 0; margin: 0; }
+
+  .viewer-inner {
+    position: relative;
+    display: inline-block;
+    line-height: 0;
+  }
+
+  .viewer-inner img {
+    display: block;
+    user-select: none;
+  }
+
+  .overlay {
+    position: absolute;
+    inset: 0;
+  }
+
+  .block-box {
+    position: absolute;
+    border: 1.5px solid var(--accent);
+    background: var(--accent-tint);
+    opacity: 0.55;
+    cursor: pointer;
+    border-radius: 2px;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .block-box { transition: background-color 120ms ease, border-color 120ms ease, opacity 120ms ease; }
+  }
+
+  .block-box:hover { background: var(--accent-tint-strong); opacity: 1; }
+
+  .block-box:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    opacity: 1;
+  }
+
+  .block-box.is-active {
+    border-color: var(--accent-strong);
+    border-width: 2px;
+    background: var(--accent-tint-strong);
+    box-shadow: 0 0 0 3px var(--accent-tint-strong);
+    opacity: 1;
+  }
+
+  .block-box.has-edit { border-color: var(--edited); background: var(--edited-tint); }
+  .block-box.has-edit:hover { background: var(--edited-tint-strong); }
+  .block-box.has-edit.is-active {
+    border-color: var(--edited);
+    background: var(--edited-tint-strong);
+    box-shadow: 0 0 0 3px var(--edited-tint-strong);
+  }
+
+  .block-box.has-edit::after {
+    content: "";
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--edited);
+    border: 1.5px solid var(--surface);
+  }
+
+  /* --- Editor panel --- */
+  .block-editor h2, .corrections-panel h2 {
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+  }
+
+  .block-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+  }
+
+  .badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 3px 8px;
+    border-radius: 100px;
+    background: var(--surface-alt);
+    border: 1px solid var(--border-strong);
+    color: var(--text-muted);
+  }
+
+  .meta-text {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+    color: var(--text-faint);
+  }
+
+  .field-label {
+    display: block;
+    font-size: 11.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-muted);
+    margin: 10px 0 5px;
+  }
+
+  .original-text {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 12.5px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: var(--surface-alt);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    color: var(--text-faint);
+    max-height: 120px;
+    overflow-y: auto;
+    margin: 0;
+  }
+
+  .mono-field {
+    width: 100%;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+    line-height: 1.45;
+    background: var(--surface-alt);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    resize: vertical;
+    color: var(--text);
+  }
+
+  .mono-field:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    border-color: var(--accent);
+  }
+
+  .editor-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+  }
+
+  .btn {
+    font-size: 12.5px;
+    font-weight: 600;
+    border-radius: 6px;
+    padding: 7px 12px;
+    cursor: pointer;
+    border: 1px solid var(--border-strong);
+    background: var(--surface-alt);
+    color: var(--text);
+  }
+
+  .btn:hover { border-color: var(--accent); color: var(--accent-strong); }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn:disabled:hover { border-color: var(--border-strong); color: var(--text); }
+
+  .btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-contrast);
+  }
+  .btn.primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--accent-contrast); }
+
+  .btn.ghost { background: transparent; }
+
+  .btn.ghost.danger { color: var(--danger); border-color: var(--border); }
+  .btn.ghost.danger:hover { border-color: var(--danger); background: var(--danger-tint); color: var(--danger); }
+
+  .btn.small { padding: 4px 8px; font-size: 11.5px; }
+  .btn.full { width: 100%; margin-top: 10px; }
+
+  /* --- Corrections list --- */
+  .corrections-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .corrections-header h2 { margin-bottom: 0; display: flex; align-items: center; gap: 6px; }
+
+  .count-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 100px;
+    background: var(--accent-tint-strong);
+    color: var(--accent-strong);
+    font-size: 11px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .corrections-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 340px;
+    overflow-y: auto;
+  }
+
+  .correction-item {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 9px;
+    background: var(--surface-alt);
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .correction-item:hover { border-color: var(--edited); }
+  .correction-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  .correction-item .ci-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+  }
+
+  .correction-item .ci-loc {
+    font-size: 11px;
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .correction-item .ci-remove {
+    background: none;
+    border: none;
+    color: var(--text-faint);
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    padding: 2px 4px;
+    border-radius: 4px;
+  }
+
+  .correction-item .ci-remove:hover { color: var(--danger); background: var(--danger-tint); }
+
+  .correction-item .ci-diff {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .correction-item .ci-diff .old { color: var(--text-faint); text-decoration: line-through; }
+  .correction-item .ci-diff .arrow { color: var(--text-faint); margin: 0 4px; }
+  .correction-item .ci-diff .new { color: var(--edited); font-weight: 600; }
+
+  ::selection { background: var(--accent-tint-strong); }
+</style>
+<div class="app">
+  <header class="app-header">
+    <h1>OCR-редактор</h1>
+    <p class="subtitle">Візуальна звірка розпізнаного MinerU тексту зі сканом і точкове виправлення помилок OCR. Усі дані залишаються в браузері — файли не надсилаються нікуди.</p>
+  </header>
+
+  <main class="layout">
+    <section class="viewer-col" aria-label="Перегляд сторінки">
+      <div class="card toolbar">
+        <div class="file-row">
+          <label class="file-field">
+            <span>Сторінки (PNG), можна вибрати кілька</span>
+            <input type="file" id="imgInput" multiple accept="image/*">
+          </label>
+          <label class="file-field">
+            <span>content_list.json</span>
+            <input type="file" id="jsonInput" accept=".json,application/json">
+          </label>
+        </div>
+        <p class="status-line" id="loadStatus">Завантажте зображення сторінок і content_list.json, щоб почати звірку.</p>
+        <details class="mapping" id="mappingBlock" hidden>
+          <summary>Відповідність сторінок і зображень</summary>
+          <div class="mapping-list" id="mappingList"></div>
+        </details>
+      </div>
+
+      <div class="card nav-bar" id="navBar" hidden>
+        <button type="button" class="icon-btn" id="prevPage" aria-label="Попередня сторінка">&larr;</button>
+        <select id="pageSelect" aria-label="Вибір сторінки"></select>
+        <button type="button" class="icon-btn" id="nextPage" aria-label="Наступна сторінка">&rarr;</button>
+        <label class="zoom-field">
+          <span>Масштаб</span>
+          <select id="zoomSelect" aria-label="Масштаб сторінки">
+            <option value="75">75%</option>
+            <option value="100" selected>100%</option>
+            <option value="125">125%</option>
+            <option value="150">150%</option>
+            <option value="200">200%</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="viewer-frame" id="viewerFrame">
+        <p class="empty-state" id="viewerEmpty">Тут з'явиться скан сторінки з рамками розпізнаних блоків. Наведіть — блок підсвітиться; клікніть — відкриється редагування тексту праворуч.</p>
+        <div class="viewer-inner" id="viewerInner" hidden>
+          <img id="pageImg" alt="Скан поточної сторінки документа">
+          <div class="overlay" id="overlay"></div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="editor-col" aria-label="Редагування блоку та список правок">
+      <div class="card block-editor" id="blockEditor">
+        <h2>Блок</h2>
+        <p class="empty-state small" id="editorEmpty">Виберіть блок на сторінці, щоб побачити розпізнаний текст.</p>
+        <div id="editorForm" hidden>
+          <div class="block-meta">
+            <span class="badge" id="editorTypeBadge">Текст</span>
+            <span class="meta-text" id="editorMeta"></span>
+          </div>
+          <div id="editorOriginalWrap" hidden>
+            <span class="field-label">Було розпізнано спочатку</span>
+            <pre class="original-text" id="editorOriginal"></pre>
+          </div>
+          <label class="field-label" for="editorTextarea">Текст блоку (можна редагувати)</label>
+          <textarea id="editorTextarea" class="mono-field" rows="10" spellcheck="false"></textarea>
+          <div class="editor-actions">
+            <button type="button" class="btn primary" id="saveEdit">Зберегти правку</button>
+            <button type="button" class="btn ghost" id="cancelEdit">Скасувати</button>
+            <button type="button" class="btn ghost danger" id="revertEdit" hidden>Скинути правку</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card corrections-panel">
+        <div class="corrections-header">
+          <h2>Внесені правки <span class="count-badge" id="correctionsCount">0</span></h2>
+          <button type="button" class="btn ghost small" id="clearAll">Очистити все</button>
+        </div>
+        <ul class="corrections-list" id="correctionsList">
+          <li class="empty-state small">Поки що немає правок.</li>
+        </ul>
+        <button type="button" class="btn primary full" id="exportBtn" disabled>Експортувати правки (JSON)</button>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---------- State ----------
+  var state = {
+    pages: [],            // [{page_idx, page_size, blocks: [{id, type, bbox, text}]}] sorted by page_idx
+    pageByIdx: {},         // page_idx -> page object
+    images: [],            // [{name, url}] natural-sorted
+    assignments: {},       // page_idx -> {name, url}
+    assignmentsAuto: true,  // becomes false once user manually changes a mapping
+    currentPageIdx: null,
+    corrections: {},       // key `${page_idx}#${blockId}` -> {page_idx, block_id, block_index, block_type, bbox, old_text, new_text, edited_at}
+    activeBlockKey: null,
+    zoom: 100
+  };
+
+  // ---------- DOM refs ----------
+  var imgInput = document.getElementById('imgInput');
+  var jsonInput = document.getElementById('jsonInput');
+  var loadStatus = document.getElementById('loadStatus');
+  var mappingBlock = document.getElementById('mappingBlock');
+  var mappingList = document.getElementById('mappingList');
+  var navBar = document.getElementById('navBar');
+  var prevPageBtn = document.getElementById('prevPage');
+  var nextPageBtn = document.getElementById('nextPage');
+  var pageSelect = document.getElementById('pageSelect');
+  var zoomSelect = document.getElementById('zoomSelect');
+  var viewerFrame = document.getElementById('viewerFrame');
+  var viewerEmpty = document.getElementById('viewerEmpty');
+  var viewerInner = document.getElementById('viewerInner');
+  var pageImg = document.getElementById('pageImg');
+  var overlay = document.getElementById('overlay');
+
+  var editorEmpty = document.getElementById('editorEmpty');
+  var editorForm = document.getElementById('editorForm');
+  var editorTypeBadge = document.getElementById('editorTypeBadge');
+  var editorMeta = document.getElementById('editorMeta');
+  var editorOriginalWrap = document.getElementById('editorOriginalWrap');
+  var editorOriginal = document.getElementById('editorOriginal');
+  var editorTextarea = document.getElementById('editorTextarea');
+  var saveEditBtn = document.getElementById('saveEdit');
+  var cancelEditBtn = document.getElementById('cancelEdit');
+  var revertEditBtn = document.getElementById('revertEdit');
+
+  var correctionsCount = document.getElementById('correctionsCount');
+  var correctionsList = document.getElementById('correctionsList');
+  var exportBtn = document.getElementById('exportBtn');
+  var clearAllBtn = document.getElementById('clearAll');
+
+  var TYPE_LABELS = {
+    table: 'Таблиця',
+    text: 'Текст',
+    title: 'Заголовок',
+    image: 'Зображення',
+    interline_equation: 'Формула'
+  };
+
+  // ---------- Natural sort ----------
+  function naturalCompare(a, b) {
+    var ax = [], bx = [];
+    a.replace(/(\d+)|(\D+)/g, function (_, d, s) { ax.push([d ? 1 : 0, d ? parseInt(d, 10) : s]); });
+    b.replace(/(\d+)|(\D+)/g, function (_, d, s) { bx.push([d ? 1 : 0, d ? parseInt(d, 10) : s]); });
+    while (ax.length && bx.length) {
+      var an = ax.shift(), bn = bx.shift();
+      var nn = (an[0] - bn[0]) || (an[1] > bn[1] ? 1 : an[1] < bn[1] ? -1 : 0);
+      if (nn) return nn;
+    }
+    return ax.length - bx.length;
+  }
+
+  // ---------- Block text extraction ----------
+  function extractBlockText(block) {
+    if (block && Array.isArray(block.blocks) && block.blocks.length) {
+      return block.blocks.map(extractBlockText).filter(Boolean).join('\n');
+    }
+    if (block && Array.isArray(block.lines) && block.lines.length) {
+      return block.lines.map(function (line) {
+        if (!line || !Array.isArray(line.spans)) return '';
+        return line.spans.map(function (span) {
+          if (!span) return '';
+          if (span.type === 'table' && typeof span.html === 'string') return span.html;
+          if (typeof span.content === 'string') return span.content;
+          return '';
+        }).filter(Boolean).join(' ');
+      }).filter(Boolean).join('\n');
+    }
+    return '';
+  }
+
+  function parsePdfInfo(json) {
+    var pdfInfo = json && Array.isArray(json.pdf_info) ? json.pdf_info : [];
+    var pages = pdfInfo.map(function (page) {
+      var rawBlocks = (Array.isArray(page.preproc_blocks) && page.preproc_blocks.length)
+        ? page.preproc_blocks
+        : (Array.isArray(page.para_blocks) ? page.para_blocks : []);
+      var blocks = rawBlocks.map(function (b, i) {
+        if (!b || !Array.isArray(b.bbox) || b.bbox.length !== 4) return null;
+        return {
+          id: 'b' + i,
+          index: (typeof b.index === 'number') ? b.index : null,
+          type: b.type || 'text',
+          bbox: b.bbox,
+          text: extractBlockText(b)
+        };
+      }).filter(Boolean);
+      return {
+        page_idx: page.page_idx,
+        page_size: Array.isArray(page.page_size) ? page.page_size : [0, 0],
+        blocks: blocks
+      };
+    });
+    pages.sort(function (a, b) { return a.page_idx - b.page_idx; });
+    return pages;
+  }
+
+  // ---------- File loading ----------
+  imgInput.addEventListener('change', function () {
+    var files = Array.prototype.slice.call(imgInput.files || []);
+    if (!files.length) return;
+    state.images.forEach(function (im) { URL.revokeObjectURL(im.url); });
+    files.sort(function (a, b) { return naturalCompare(a.name, b.name); });
+    state.images = files.map(function (f) { return { name: f.name, url: URL.createObjectURL(f) }; });
+    state.assignments = {};
+    state.assignmentsAuto = true;
+    autoAssignImages();
+    buildMappingUI();
+    refreshStatus();
+    if (state.currentPageIdx !== null) renderPage(state.currentPageIdx);
+  });
+
+  jsonInput.addEventListener('change', function () {
+    var file = jsonInput.files && jsonInput.files[0];
+    if (!file) return;
+    if (Object.keys(state.corrections).length) {
+      var ok = confirm('У вас є незбережені правки (' + Object.keys(state.corrections).length + '). Завантажити новий документ і очистити список правок?');
+      if (!ok) { jsonInput.value = ''; return; }
+    }
+    file.text().then(function (text) {
+      var json;
+      try { json = JSON.parse(text); }
+      catch (e) { loadStatus.textContent = 'Не вдалося розібрати JSON: ' + e.message; return; }
+      state.pages = parsePdfInfo(json);
+      state.pageByIdx = {};
+      state.pages.forEach(function (p) { state.pageByIdx[p.page_idx] = p; });
+      state.corrections = {};
+      state.activeBlockKey = null;
+      renderCorrections();
+      closeEditor();
+      buildPageSelect();
+      state.assignmentsAuto = true;
+      state.assignments = {};
+      autoAssignImages();
+      buildMappingUI();
+      refreshStatus();
+      if (state.pages.length) {
+        navBar.hidden = false;
+        renderPage(state.pages[0].page_idx);
+      }
+    }).catch(function (e) {
+      loadStatus.textContent = 'Не вдалося прочитати файл: ' + e.message;
+    });
+  });
+
+  function autoAssignImages() {
+    if (!state.assignmentsAuto) return;
+    if (!state.pages.length || !state.images.length) return;
+    state.pages.forEach(function (p, i) {
+      if (state.images[i]) state.assignments[p.page_idx] = state.images[i];
+    });
+  }
+
+  function buildMappingUI() {
+    if (!state.pages.length || !state.images.length) { mappingBlock.hidden = true; return; }
+    mappingBlock.hidden = false;
+    mappingBlock.open = true;
+    mappingList.innerHTML = '';
+    state.pages.forEach(function (p) {
+      var row = document.createElement('div');
+      row.className = 'mapping-row';
+
+      var label = document.createElement('span');
+      label.className = 'page-label';
+      label.textContent = 'Сторінка ' + (state.pages.indexOf(p) + 1) + ' (page_idx ' + p.page_idx + ')';
+
+      var select = document.createElement('select');
+      var noneOpt = document.createElement('option');
+      noneOpt.value = '';
+      noneOpt.textContent = '— немає зображення —';
+      select.appendChild(noneOpt);
+      state.images.forEach(function (im) {
+        var opt = document.createElement('option');
+        opt.value = im.name;
+        opt.textContent = im.name;
+        if (state.assignments[p.page_idx] && state.assignments[p.page_idx].name === im.name) opt.selected = true;
+        select.appendChild(opt);
+      });
+      select.addEventListener('change', function () {
+        state.assignmentsAuto = false;
+        var chosen = state.images.filter(function (im) { return im.name === select.value; })[0];
+        if (chosen) state.assignments[p.page_idx] = chosen; else delete state.assignments[p.page_idx];
+        if (state.currentPageIdx === p.page_idx) renderPage(p.page_idx);
+      });
+
+      row.appendChild(label);
+      row.appendChild(select);
+      mappingList.appendChild(row);
+    });
+  }
+
+  function refreshStatus() {
+    var parts = [];
+    parts.push(state.images.length ? (state.images.length + ' зображень завантажено') : 'зображення не завантажені');
+    parts.push(state.pages.length ? (state.pages.length + ' сторінок у JSON') : 'JSON не завантажено');
+    loadStatus.textContent = parts.join(' · ') + '. Порада: експортуйте правки перед завантаженням нового документа.';
+  }
+
+  // ---------- Page navigation ----------
+  function buildPageSelect() {
+    pageSelect.innerHTML = '';
+    state.pages.forEach(function (p, i) {
+      var opt = document.createElement('option');
+      opt.value = String(p.page_idx);
+      opt.textContent = 'Сторінка ' + (i + 1) + ' (page_idx ' + p.page_idx + ', блоків: ' + p.blocks.length + ')';
+      pageSelect.appendChild(opt);
+    });
+  }
+
+  pageSelect.addEventListener('change', function () {
+    renderPage(parseInt(pageSelect.value, 10));
+  });
+
+  prevPageBtn.addEventListener('click', function () {
+    var i = state.pages.findIndex(function (p) { return p.page_idx === state.currentPageIdx; });
+    if (i > 0) renderPage(state.pages[i - 1].page_idx);
+  });
+
+  nextPageBtn.addEventListener('click', function () {
+    var i = state.pages.findIndex(function (p) { return p.page_idx === state.currentPageIdx; });
+    if (i >= 0 && i < state.pages.length - 1) renderPage(state.pages[i + 1].page_idx);
+  });
+
+  zoomSelect.addEventListener('change', function () {
+    state.zoom = parseInt(zoomSelect.value, 10) || 100;
+    if (state.currentPageIdx !== null) renderPage(state.currentPageIdx);
+  });
+
+  var resizeTimer = null;
+  window.addEventListener('resize', function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () {
+      if (state.currentPageIdx !== null) renderPage(state.currentPageIdx);
+    }, 150);
+  });
+
+  // ---------- Rendering ----------
+  function renderPage(pageIdx) {
+    state.currentPageIdx = pageIdx;
+    pageSelect.value = String(pageIdx);
+    prevPageBtn.disabled = state.pages.findIndex(function (p) { return p.page_idx === pageIdx; }) <= 0;
+    nextPageBtn.disabled = state.pages.findIndex(function (p) { return p.page_idx === pageIdx; }) >= state.pages.length - 1;
+
+    var page = state.pageByIdx[pageIdx];
+    var img = state.assignments[pageIdx];
+
+    if (!page) return;
+
+    if (!img) {
+      viewerEmpty.hidden = false;
+      viewerEmpty.textContent = 'Немає зображення для сторінки page_idx ' + pageIdx + '. Призначте його у списку відповідності вище.';
+      viewerInner.hidden = true;
+      return;
+    }
+
+    viewerEmpty.hidden = true;
+    viewerInner.hidden = false;
+
+    var draw = function () {
+      var frameWidth = viewerFrame.clientWidth - 2;
+      var baseWidth = Math.max(frameWidth, 320) * (state.zoom / 100);
+      pageImg.style.width = baseWidth + 'px';
+      pageImg.style.height = 'auto';
+
+      requestAnimationFrame(function () {
+        var rect = { w: pageImg.clientWidth, h: pageImg.clientHeight };
+        var scaleX = page.page_size[0] ? rect.w / page.page_size[0] : 1;
+        var scaleY = page.page_size[1] ? rect.h / page.page_size[1] : 1;
+        drawOverlay(page, scaleX, scaleY);
+      });
+    };
+
+    if (pageImg.src !== img.url) {
+      pageImg.onload = draw;
+      pageImg.src = img.url;
+    } else {
+      draw();
+    }
+  }
+
+  function correctionKey(pageIdx, blockId) { return pageIdx + '#' + blockId; }
+
+  function drawOverlay(page, scaleX, scaleY) {
+    overlay.innerHTML = '';
+    page.blocks.forEach(function (block) {
+      var box = document.createElement('div');
+      box.className = 'block-box';
+      var key = correctionKey(page.page_idx, block.id);
+      if (state.corrections[key]) box.classList.add('has-edit');
+      if (state.activeBlockKey === key) box.classList.add('is-active');
+
+      var x1 = block.bbox[0] * scaleX, y1 = block.bbox[1] * scaleY;
+      var x2 = block.bbox[2] * scaleX, y2 = block.bbox[3] * scaleY;
+      box.style.left = x1 + 'px';
+      box.style.top = y1 + 'px';
+      box.style.width = Math.max(x2 - x1, 2) + 'px';
+      box.style.height = Math.max(y2 - y1, 2) + 'px';
+
+      var typeLabel = TYPE_LABELS[block.type] || block.type;
+      box.title = typeLabel + (block.index !== null ? ' · #' + block.index : '') + (state.corrections[key] ? ' · відредаговано' : '');
+      box.tabIndex = 0;
+      box.setAttribute('role', 'button');
+      box.setAttribute('aria-label', 'Блок: ' + typeLabel);
+
+      box.addEventListener('click', function () { openEditor(page, block); });
+      box.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openEditor(page, block); }
+      });
+
+      overlay.appendChild(box);
+    });
+  }
+
+  // ---------- Editor ----------
+  function openEditor(page, block) {
+    var key = correctionKey(page.page_idx, block.id);
+    state.activeBlockKey = key;
+    refreshOverlayStates();
+
+    editorEmpty.hidden = true;
+    editorForm.hidden = false;
+
+    var typeLabel = TYPE_LABELS[block.type] || block.type;
+    editorTypeBadge.textContent = typeLabel;
+    editorMeta.textContent = 'page_idx ' + page.page_idx + (block.index !== null ? ' · блок #' + block.index : '') +
+      ' · bbox [' + block.bbox.join(', ') + ']';
+
+    var existing = state.corrections[key];
+    if (existing) {
+      editorOriginalWrap.hidden = false;
+      editorOriginal.textContent = existing.old_text;
+      editorTextarea.value = existing.new_text;
+      revertEditBtn.hidden = false;
+    } else {
+      editorOriginalWrap.hidden = true;
+      editorTextarea.value = block.text;
+      revertEditBtn.hidden = true;
+    }
+
+    editorTextarea.dataset.pageIdx = String(page.page_idx);
+    editorTextarea.dataset.blockId = block.id;
+    editorTextarea.dataset.blockType = block.type;
+    editorTextarea.dataset.blockIndex = block.index === null ? '' : String(block.index);
+    editorTextarea.dataset.bbox = JSON.stringify(block.bbox);
+    editorTextarea.dataset.originalText = block.text;
+
+    editorTextarea.focus();
+  }
+
+  function closeEditor() {
+    state.activeBlockKey = null;
+    editorForm.hidden = true;
+    editorEmpty.hidden = false;
+    refreshOverlayStates();
+  }
+
+  function refreshOverlayStates() {
+    Array.prototype.forEach.call(overlay.querySelectorAll('.block-box'), function (box) {
+      box.classList.remove('is-active');
+    });
+    if (state.activeBlockKey && state.currentPageIdx !== null) {
+      var page = state.pageByIdx[state.currentPageIdx];
+      if (page) {
+        var idx = page.blocks.findIndex(function (b) { return correctionKey(page.page_idx, b.id) === state.activeBlockKey; });
+        if (idx >= 0 && overlay.children[idx]) overlay.children[idx].classList.add('is-active');
+      }
+    }
+  }
+
+  saveEditBtn.addEventListener('click', function () {
+    var ds = editorTextarea.dataset;
+    var pageIdx = parseInt(ds.pageIdx, 10);
+    var key = correctionKey(pageIdx, ds.blockId);
+    var newText = editorTextarea.value;
+    var originalText = ds.originalText;
+
+    if (newText === originalText) {
+      delete state.corrections[key];
+    } else {
+      state.corrections[key] = {
+        page_idx: pageIdx,
+        block_id: ds.blockId,
+        block_index: ds.blockIndex === '' ? null : parseInt(ds.blockIndex, 10),
+        block_type: ds.blockType,
+        bbox: JSON.parse(ds.bbox),
+        old_text: originalText,
+        new_text: newText,
+        edited_at: new Date().toISOString()
+      };
+    }
+    renderCorrections();
+    if (state.currentPageIdx !== null) renderPage(state.currentPageIdx);
+    else refreshOverlayStates();
+  });
+
+  cancelEditBtn.addEventListener('click', function () {
+    var key = state.activeBlockKey;
+    var existing = key ? state.corrections[key] : null;
+    editorTextarea.value = existing ? existing.new_text : editorTextarea.dataset.originalText;
+  });
+
+  revertEditBtn.addEventListener('click', function () {
+    var key = state.activeBlockKey;
+    if (key && state.corrections[key]) {
+      delete state.corrections[key];
+      editorTextarea.value = editorTextarea.dataset.originalText;
+      editorOriginalWrap.hidden = true;
+      revertEditBtn.hidden = true;
+      renderCorrections();
+      if (state.currentPageIdx !== null) renderPage(state.currentPageIdx);
+    }
+  });
+
+  // ---------- Corrections list & export ----------
+  function truncate(s, n) {
+    s = (s || '').replace(/\s+/g, ' ').trim();
+    return s.length > n ? s.slice(0, n) + '…' : s;
+  }
+
+  function renderCorrections() {
+    var keys = Object.keys(state.corrections);
+    correctionsCount.textContent = String(keys.length);
+    exportBtn.disabled = keys.length === 0;
+    correctionsList.innerHTML = '';
+
+    if (!keys.length) {
+      var li = document.createElement('li');
+      li.className = 'empty-state small';
+      li.textContent = 'Поки що немає правок.';
+      correctionsList.appendChild(li);
+      return;
+    }
+
+    keys.sort(function (a, b) {
+      var ca = state.corrections[a], cb = state.corrections[b];
+      return (ca.page_idx - cb.page_idx) || ca.block_id.localeCompare(cb.block_id);
+    }).forEach(function (key) {
+      var c = state.corrections[key];
+      var li = document.createElement('li');
+      li.className = 'correction-item';
+      li.tabIndex = 0;
+
+      var top = document.createElement('div');
+      top.className = 'ci-top';
+      var loc = document.createElement('span');
+      loc.className = 'ci-loc';
+      loc.textContent = 'page_idx ' + c.page_idx + (c.block_index !== null ? ' · #' + c.block_index : '') + ' · ' + (TYPE_LABELS[c.block_type] || c.block_type);
+      var remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'ci-remove';
+      remove.textContent = '✕';
+      remove.setAttribute('aria-label', 'Видалити цю правку');
+      remove.addEventListener('click', function (e) {
+        e.stopPropagation();
+        delete state.corrections[key];
+        if (state.activeBlockKey === key) closeEditor();
+        renderCorrections();
+        if (state.currentPageIdx !== null) renderPage(state.currentPageIdx);
+      });
+      top.appendChild(loc);
+      top.appendChild(remove);
+
+      var diff = document.createElement('div');
+      diff.className = 'ci-diff';
+      var oldSpan = document.createElement('span');
+      oldSpan.className = 'old';
+      oldSpan.textContent = truncate(c.old_text, 28) || '(порожньо)';
+      var arrow = document.createElement('span');
+      arrow.className = 'arrow';
+      arrow.textContent = '→';
+      var newSpan = document.createElement('span');
+      newSpan.className = 'new';
+      newSpan.textContent = truncate(c.new_text, 28) || '(порожньо)';
+      diff.appendChild(oldSpan);
+      diff.appendChild(arrow);
+      diff.appendChild(newSpan);
+      li.title = 'Було: ' + c.old_text + '\n\nСтало: ' + c.new_text;
+
+      li.appendChild(top);
+      li.appendChild(diff);
+
+      li.addEventListener('click', function () {
+        if (state.currentPageIdx !== c.page_idx) renderPage(c.page_idx);
+        var page = state.pageByIdx[c.page_idx];
+        var block = page && page.blocks.filter(function (b) { return b.id === c.block_id; })[0];
+        if (page && block) openEditor(page, block);
+      });
+      li.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); li.click(); }
+      });
+
+      correctionsList.appendChild(li);
+    });
+  }
+
+  clearAllBtn.addEventListener('click', function () {
+    if (!Object.keys(state.corrections).length) return;
+    if (!confirm('Очистити всі внесені правки (' + Object.keys(state.corrections).length + ')? Дію не можна скасувати.')) return;
+    state.corrections = {};
+    closeEditor();
+    renderCorrections();
+    if (state.currentPageIdx !== null) renderPage(state.currentPageIdx);
+  });
+
+  exportBtn.addEventListener('click', function () {
+    var list = Object.keys(state.corrections).map(function (k) { return state.corrections[k]; });
+    list.sort(function (a, b) { return (a.page_idx - b.page_idx) || a.block_id.localeCompare(b.block_id); });
+    var blob = new Blob([JSON.stringify(list, null, 2)], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    var ts = new Date().toISOString().replace(/[:.]/g, '-');
+    a.download = 'ocr-corrections-' + ts + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  });
+
+  renderCorrections();
+})();
+</script>
