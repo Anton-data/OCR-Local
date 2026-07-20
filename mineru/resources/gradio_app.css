@@ -1024,7 +1024,18 @@ body.dark .mineru-actions button[class*="primary"] {
     margin-bottom: 10px;
 }
 .mineru-editor-thumbnails {
-    max-height: 220px;
+    height: 280px;
+    max-height: 280px;
+    overflow-y: auto;
+}
+.mineru-editor-thumbnails .grid-wrap {
+    overflow-y: auto !important;
+}
+.mineru-file-label {
+    margin: 8px 0 4px;
+    color: var(--body-text-color-subdued);
+    font-size: 12px;
+    font-weight: 600;
 }
 .mineru-editor-status {
     font-size: 13px;
@@ -1080,6 +1091,10 @@ body.dark .mineru-actions button[class*="primary"] {
 .mineru-editor-side {
     min-width: 0 !important;
 }
+.mineru-editor-canvas {
+    /* Система координат прозрачной кнопки выбора блока. */
+    position: relative !important;
+}
 .mineru-editor-side {
     position: sticky;
     top: 12px;
@@ -1093,8 +1108,26 @@ body.dark .mineru-actions button[class*="primary"] {
     color: var(--body-text-color-subdued);
     font-size: 13px;
 }
-#mineru-editor-select-trigger {
-    display: none !important;
+/* Relay-канал кликов редактора: textbox должен существовать в DOM (чтобы
+   Svelte-байндинг принимал программные события input), но быть невидимым и
+   не перехватывать указатель. Прячем через CSS, а не visible=False. */
+.mineru-editor-click-relay,
+#mineru-editor-click-relay {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    opacity: 0 !important;
+    overflow: hidden !important;
+    pointer-events: none !important;
+}
+/* Пункты списка таблиц — в одну строку: перенос смещал hit-box пунктов
+   относительно видимого текста, и мышиные клики попадали мимо. */
+.mineru-editor-table-picker ul.options li,
+.mineru-editor-table-picker ul.options .item {
+    white-space: nowrap;
 }
 .mineru-editor-page.mineru-ez-panning {
     cursor: grabbing;

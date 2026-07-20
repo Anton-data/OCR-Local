@@ -1091,6 +1091,87 @@ def build_gradio_upload_name(file_path):
     return f"{normalize_task_stem(path.stem)}{path.suffix}"
 
 
+_BATCH_INPUT_SUFFIXES = frozenset(
+    f".{suffix.lower()}" for suffix in pdf_suffixes + image_suffixes + office_suffixes
+)
+_BATCH_RESULT_DIR_SUFFIX = "_MinerU"
+
+
+def resolve_batch_source_directory(source_folder: str) -> Path:
+    """Resolve a user-entered Windows source folder inside the Docker mount.
+
+    Browser uploads deliberately expose only a temporary server-side copy, so
+    saving a result beside the *original* is possible only for a folder that
+    the local Gradio container can access directly. ``docker/compose.dev.yaml``
+    maps the configured host drive to ``MINERU_BATCH_HOST_ROOT``.
+    """
+    raw_path = (source_folder or "").strip().strip('"')
+    if not raw_path:
+        raise ValueError("Source folder is not specified")
+
+    host_root = Path(os.getenv("MINERU_BATCH_HOST_ROOT", "/host-d")).resolve()
+    host_drive = os.getenv("MINERU_BATCH_SOURCE_DRIVE", "D").upper()
+    windows_match = re.fullmatch(r"([a-zA-Z]):[\\/](.*)", raw_path)
+    if windows_match:
+        drive, relative_path = windows_match.groups()
+        if drive.upper() != host_drive:
+            raise ValueError(f"Only the {host_drive}: drive is available for batch source folders")
+        candidate = host_root.joinpath(*[part for part in re.split(r"[\\/]+", relative_path) if part])
+    else:
+        candidate = Path(raw_path)
+
+    resolved = candidate.resolve()
+    if not resolved.is_relative_to(host_root):
+        raise ValueError("Source folder must be inside the configured local source drive")
+    if not resolved.is_dir():
+        raise ValueError(f"Source folder does not exist: {raw_path}")
+    return resolved
+
+
+def find_batch_input_files(source_dir: str | Path, recursive: bool = False) -> list[Path]:
+    """Return supported source documents while never re-processing MinerU output."""
+    source_dir = Path(source_dir)
+    iterator = source_dir.rglob("*") if recursive else source_dir.glob("*")
+    files = []
+    for path in iterator:
+        if not path.is_file() or path.suffix.lower() not in _BATCH_INPUT_SUFFIXES:
+            continue
+        if any(part.casefold().endswith(_BATCH_RESULT_DIR_SUFFIX.casefold()) for part in path.parts):
+            continue
+        files.append(path)
+    return sorted(files, key=lambda path: str(path).casefold())
+
+
+def _unique_batch_result_dir(source_file: Path) -> Path:
+    base_dir = source_file.parent / f"{normalize_task_stem(source_file.stem)}{_BATCH_RESULT_DIR_SUFFIX}"
+    if not base_dir.exists():
+        return base_dir
+    for suffix in range(2, 10_000):
+        candidate = base_dir.with_name(f"{base_dir.name}_{suffix}")
+        if not candidate.exists():
+            return candidate
+    raise RuntimeError(f"Could not create a unique result folder for {source_file.name}")
+
+
+def save_batch_result_next_to_source(local_md_dir: str | Path, source_file: str | Path) -> Path:
+    """Copy a complete parsed-result directory beside its source without overwrite."""
+    destination = _unique_batch_result_dir(Path(source_file))
+    shutil.copytree(local_md_dir, destination)
+    return destination
+
+
+def create_batch_result_archive(result_dirs: list[Path], archive_path: str | Path) -> Path:
+    """Create one portable ZIP containing all successful per-document results."""
+    archive_path = Path(archive_path)
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for result_dir in result_dirs:
+            for path in result_dir.rglob("*"):
+                if path.is_file():
+                    archive.write(path, path.relative_to(result_dir.parent))
+    return archive_path
+
+
 def resolve_result_file_name(submit_response, extract_root, file_path):
     if submit_response.file_names:
         return submit_response.file_names[0]
@@ -1792,6 +1873,22 @@ def main(ctx,
     i18n = gr.I18n(
         en={
             "upload_file": "Select or paste a file to upload\nPDF, image, DOCX, PPTX, or XLSX",
+            "batch_title": "Batch recognition",
+            "batch_files": "Drop several files (results will be available as a ZIP)",
+            "batch_source_folder": "Source folder on local drive D:",
+            "batch_source_folder_info": "For saving beside originals, enter a folder on D:; files are processed directly from it.",
+            "batch_recursive": "Include subfolders",
+            "batch_save_next_to_source": "Save each result next to its original",
+            "batch_convert": "Process batch",
+            "batch_result": "Batch result ZIP",
+            "batch_report": "Batch report",
+            "batch_processing": "Processing",
+            "batch_progress": "Batch progress",
+            "batch_completed": "Batch completed",
+            "batch_failed": "Failed",
+            "batch_no_files": "No supported documents were found",
+            "batch_error": "Batch setup error",
+            "batch_archive_error": "Could not create the result archive",
             "app_workspace": "Workspace",
             "tools_label": "Tools",
             "active_tool": "Active tool",
@@ -1879,6 +1976,9 @@ def main(ctx,
             "hybrid_effort": "Hybrid effort",
             "hybrid_effort_info": "Medium is faster. High is more accurate and may take longer.",
             "save_button": "💾 Save",
+            "edit_markdown_rendering": "✏️ Edit Markdown",
+            "close_markdown_editor": "← Back to rendering",
+            "save_markdown_rendering": "💾 Save rendering edits",
             "save_error_no_result": "No conversion result to save yet. Convert a document first.",
             "save_md_success": "Markdown text saved",
             "save_md_error": "Failed to save Markdown text",
@@ -1891,6 +1991,8 @@ def main(ctx,
             "editor_no_origin_pdf": "The visual editor is only available for PDF/scanned documents.",
             "editor_load_error": "Failed to load the editor page",
             "editor_block_no_text": "This block has no editable text",
+            "editor_no_block_at_click": "No recognized block at the clicked point",
+            "editor_block_selected": "Block selected. Edit its content, then apply the edit.",
             "editor_save_error": "Failed to save the edit",
             "editor_save_success": "Edit saved",
             "editor_table_structure_error": "Table structure changed, edit was not saved",
@@ -1903,12 +2005,32 @@ def main(ctx,
             "editor_refresh_exports": "Refresh DOCX and PDF",
             "editor_exports_dirty": "There are edits not yet reflected in the exports",
             "editor_zoom_fit": "Fit",
-            "editor_no_suspects": "No suspect blocks found.",
-            "editor_next_suspect": "→ Suspect",
+            "editor_no_suspects": "No low-confidence blocks found.",
+            "editor_suspect_unavailable": "This engine did not provide confidence scores for this document.",
+            "editor_next_suspect": "→ Next low-confidence block",
             "editor_thumbnails_title": "Pages",
+            "editor_select_trigger_label": "Select document block",
+            "editor_table_picker": "Detected tables",
+            "editor_table_word": "table",
         },
         zh={
             "upload_file": "请选择或粘贴要上传的文件\nPDF、图片、DOCX、PPTX 或 XLSX",
+            "batch_title": "批量识别",
+            "batch_files": "拖入多个文件（结果将提供为 ZIP）",
+            "batch_source_folder": "本地 D: 盘中的源文件夹",
+            "batch_source_folder_info": "要保存到原文件旁，请输入 D: 中的文件夹；系统将直接处理其中的文件。",
+            "batch_recursive": "包含子文件夹",
+            "batch_save_next_to_source": "将每个结果保存到原文件旁",
+            "batch_convert": "处理批次",
+            "batch_result": "批量结果 ZIP",
+            "batch_report": "批量报告",
+            "batch_processing": "正在处理",
+            "batch_progress": "批量进度",
+            "batch_completed": "批量完成",
+            "batch_failed": "失败",
+            "batch_no_files": "未找到支持的文档",
+            "batch_error": "批量设置错误",
+            "batch_archive_error": "无法创建结果压缩包",
             "app_workspace": "工作区",
             "tools_label": "工具",
             "active_tool": "当前工具",
@@ -1996,6 +2118,9 @@ def main(ctx,
             "hybrid_effort": "解析强度",
             "hybrid_effort_info": "Medium 速度更快；High 精度更高，耗时可能更长。",
             "save_button": "💾 保存",
+            "edit_markdown_rendering": "✏️ 编辑 Markdown",
+            "close_markdown_editor": "← 返回渲染预览",
+            "save_markdown_rendering": "💾 保存渲染编辑",
             "save_error_no_result": "尚无可保存的转换结果，请先完成转换。",
             "save_md_success": "Markdown 文本已保存",
             "save_md_error": "保存 Markdown 文本失败",
@@ -2008,6 +2133,8 @@ def main(ctx,
             "editor_no_origin_pdf": "可视化编辑器仅支持 PDF/扫描件。",
             "editor_load_error": "加载编辑器页面失败",
             "editor_block_no_text": "该区块没有可编辑文本",
+            "editor_no_block_at_click": "点击位置没有已识别的区块",
+            "editor_block_selected": "已选中区块。编辑内容后，应用修改。",
             "editor_save_error": "保存修改失败",
             "editor_save_success": "修改已保存",
             "editor_table_structure_error": "表格结构已更改，未保存修改",
@@ -2020,12 +2147,32 @@ def main(ctx,
             "editor_refresh_exports": "刷新 DOCX 和 PDF",
             "editor_exports_dirty": "存在尚未反映到导出文件中的修改",
             "editor_zoom_fit": "适应页面",
-            "editor_no_suspects": "未找到需要核查的块。",
-            "editor_next_suspect": "→ 待核查",
+            "editor_no_suspects": "未找到低置信度区块。",
+            "editor_suspect_unavailable": "此引擎未为该文档提供置信度评分。",
+            "editor_next_suspect": "→ 下一个低置信度区块",
             "editor_thumbnails_title": "页面",
+            "editor_select_trigger_label": "选择文档区块",
+            "editor_table_picker": "已识别表格",
+            "editor_table_word": "表格",
         },
         ru={
             "upload_file": "Выберите или вставьте файл для загрузки\nPDF, изображение, DOCX, PPTX или XLSX",
+            "batch_title": "Пакетное распознавание",
+            "batch_files": "Перетащите несколько файлов (результат будет доступен одним ZIP)",
+            "batch_source_folder": "Исходная папка на локальном диске D:",
+            "batch_source_folder_info": "Чтобы сохранить рядом с оригиналами, укажите папку на D: — файлы будут обработаны прямо из неё.",
+            "batch_recursive": "Включая вложенные папки",
+            "batch_save_next_to_source": "Сохранять каждый результат рядом с оригиналом",
+            "batch_convert": "Обработать пакет",
+            "batch_result": "ZIP с результатами пакета",
+            "batch_report": "Отчёт по пакету",
+            "batch_processing": "Обработка",
+            "batch_progress": "Прогресс пакета",
+            "batch_completed": "Пакет завершён",
+            "batch_failed": "Ошибок",
+            "batch_no_files": "Поддерживаемые документы не найдены",
+            "batch_error": "Ошибка подготовки пакета",
+            "batch_archive_error": "Не удалось создать архив результатов",
             "app_workspace": "Рабочая среда",
             "tools_label": "Инструменты",
             "active_tool": "Активный инструмент",
@@ -2113,6 +2260,9 @@ def main(ctx,
             "hybrid_effort": "Интенсивность разбора",
             "hybrid_effort_info": "Medium — быстрее. High — точнее, но может занять больше времени.",
             "save_button": "💾 Сохранить",
+            "edit_markdown_rendering": "✏️ Редактировать Markdown",
+            "close_markdown_editor": "← К рендерингу",
+            "save_markdown_rendering": "💾 Сохранить правки",
             "save_error_no_result": "Нет результата конвертации для сохранения. Сначала выполните конвертацию.",
             "save_md_success": "Текст Markdown сохранён",
             "save_md_error": "Не удалось сохранить текст Markdown",
@@ -2125,6 +2275,8 @@ def main(ctx,
             "editor_no_origin_pdf": "Визуальный редактор доступен только для PDF и сканов.",
             "editor_load_error": "Не удалось загрузить страницу редактора",
             "editor_block_no_text": "У этого блока нет редактируемого текста",
+            "editor_no_block_at_click": "В точке клика нет распознанного блока",
+            "editor_block_selected": "Блок выбран. Отредактируйте содержимое и примените правку.",
             "editor_save_error": "Не удалось сохранить правку",
             "editor_save_success": "Правка сохранена",
             "editor_table_structure_error": "Структура таблицы изменена, правка не сохранена",
@@ -2137,12 +2289,32 @@ def main(ctx,
             "editor_refresh_exports": "Обновить DOCX и PDF",
             "editor_exports_dirty": "Есть правки, не попавшие в экспорт",
             "editor_zoom_fit": "Вписать",
-            "editor_no_suspects": "Подозрительных блоков не найдено.",
-            "editor_next_suspect": "→ Подозрительный",
+            "editor_no_suspects": "Блоков с низкой уверенностью не найдено.",
+            "editor_suspect_unavailable": "Этот движок не передал оценки уверенности для документа.",
+            "editor_next_suspect": "→ К следующему неуверенному блоку",
             "editor_thumbnails_title": "Страницы",
+            "editor_select_trigger_label": "Выбрать блок документа",
+            "editor_table_picker": "Распознанные таблицы",
+            "editor_table_word": "таблица",
         },
         uk={
             "upload_file": "Виберіть або вставте файл для завантаження\nPDF, зображення, DOCX, PPTX або XLSX",
+            "batch_title": "Пакетне розпізнавання",
+            "batch_files": "Перетягніть кілька файлів (результат буде доступний одним ZIP)",
+            "batch_source_folder": "Вихідна папка на локальному диску D:",
+            "batch_source_folder_info": "Щоб зберегти поруч з оригіналами, вкажіть папку на D: — файли буде оброблено безпосередньо з неї.",
+            "batch_recursive": "З вкладеними папками",
+            "batch_save_next_to_source": "Зберігати кожен результат поруч з оригіналом",
+            "batch_convert": "Обробити пакет",
+            "batch_result": "ZIP з результатами пакета",
+            "batch_report": "Звіт за пакетом",
+            "batch_processing": "Обробка",
+            "batch_progress": "Перебіг пакета",
+            "batch_completed": "Пакет завершено",
+            "batch_failed": "Помилок",
+            "batch_no_files": "Підтримуваних документів не знайдено",
+            "batch_error": "Помилка підготовки пакета",
+            "batch_archive_error": "Не вдалося створити архів результатів",
             "app_workspace": "Робоче середовище",
             "tools_label": "Інструменти",
             "active_tool": "Активний інструмент",
@@ -2240,6 +2412,9 @@ def main(ctx,
             "errors.use_via_api": "Використовувати через API",
             "errors.use_via_api_or_mcp": "Використовувати через API або MCP",
             "save_button": "💾 Зберегти",
+            "edit_markdown_rendering": "✏️ Редагувати Markdown",
+            "close_markdown_editor": "← До відтворення",
+            "save_markdown_rendering": "💾 Зберегти правки",
             "save_error_no_result": "Немає результату конвертації для збереження. Спочатку виконайте конвертацію.",
             "save_md_success": "Текст Markdown збережено",
             "save_md_error": "Не вдалося зберегти текст Markdown",
@@ -2252,6 +2427,8 @@ def main(ctx,
             "editor_no_origin_pdf": "Візуальний редактор доступний лише для PDF і сканів.",
             "editor_load_error": "Не вдалося завантажити сторінку редактора",
             "editor_block_no_text": "У цього блоку немає редагованого тексту",
+            "editor_no_block_at_click": "У точці кліку немає розпізнаного блоку",
+            "editor_block_selected": "Блок вибрано. Відредагуйте вміст і застосуйте правку.",
             "editor_save_error": "Не вдалося зберегти правку",
             "editor_save_success": "Правку збережено",
             "editor_table_structure_error": "Структуру таблиці змінено, правку не збережено",
@@ -2264,9 +2441,13 @@ def main(ctx,
             "editor_refresh_exports": "Оновити DOCX і PDF",
             "editor_exports_dirty": "Є правки, які ще не потрапили в експорт",
             "editor_zoom_fit": "Вписати",
-            "editor_no_suspects": "Підозрілих блоків не знайдено.",
-            "editor_next_suspect": "→ Підозрілий",
+            "editor_no_suspects": "Блоків з низькою впевненістю не знайдено.",
+            "editor_suspect_unavailable": "Цей рушій не передав оцінок упевненості для документа.",
+            "editor_next_suspect": "→ До наступного невпевненого блоку",
             "editor_thumbnails_title": "Сторінки",
+            "editor_select_trigger_label": "Вибрати блок документа",
+            "editor_table_picker": "Розпізнані таблиці",
+            "editor_table_word": "таблиця",
         },
     )
 
@@ -2418,6 +2599,125 @@ def main(ctx,
             )
             yield update
 
+    async def convert_batch_to_markdown_stream(
+        uploaded_files,
+        source_folder,
+        recursive,
+        save_next_to_source,
+        end_pages=10,
+        is_ocr=False,
+        formula_enable=True,
+        table_enable=True,
+        image_analysis=True,
+        effort=DEFAULT_HYBRID_EFFORT,
+        language="ch",
+        backend="pipeline",
+        url=None,
+        request: gr.Request = None,
+    ):
+        """Process a folder or multiple uploaded files sequentially.
+
+        Sequential execution deliberately respects the existing API/GPU
+        limiter. A failure of one document is recorded in the final report and
+        does not discard results already produced for the rest of the batch.
+        """
+        request_locale = resolve_request_locale(request)
+        source_dir: Path | None = None
+        try:
+            if (source_folder or "").strip():
+                source_dir = resolve_batch_source_directory(source_folder)
+                files = find_batch_input_files(source_dir, recursive=bool(recursive))
+            else:
+                raw_files = uploaded_files if isinstance(uploaded_files, (list, tuple)) else [uploaded_files]
+                files = []
+                for raw_file in raw_files:
+                    if not raw_file:
+                        continue
+                    file_path = Path(raw_file.get("path") if isinstance(raw_file, dict) else raw_file)
+                    if file_path.is_file() and file_path.suffix.lower() in _BATCH_INPUT_SUFFIXES:
+                        files.append(file_path)
+                files.sort(key=lambda path: str(path).casefold())
+        except Exception as exc:
+            logger.warning(f"Failed to prepare batch input: {exc}")
+            yield (
+                f"**{i18n('batch_error')}**: {exc}",
+                None,
+                "",
+            )
+            return
+
+        if not files:
+            yield (f"**{i18n('batch_no_files')}**", None, "")
+            return
+
+        timestamp = time.strftime("%y%m%d_%H%M%S")
+        workspace_root = Path("./output") / "batch" / f"{timestamp}_{uuid.uuid4().hex[:8]}"
+        workspace_root.mkdir(parents=True, exist_ok=True)
+        saved_result_dirs: list[Path] = []
+        report_lines: list[str] = []
+        failed_count = 0
+
+        for index, source_file in enumerate(files, start=1):
+            yield (
+                f"**{i18n('batch_processing')} {index}/{len(files)}:** `{source_file.name}`",
+                None,
+                "\n".join(report_lines),
+            )
+            try:
+                result = await _run_to_markdown_job(
+                    file_path=str(source_file),
+                    end_pages=end_pages,
+                    is_ocr=is_ocr,
+                    formula_enable=formula_enable,
+                    table_enable=table_enable,
+                    image_analysis=image_analysis,
+                    effort=effort,
+                    language=language,
+                    backend=backend,
+                    url=url,
+                    api_url=api_url,
+                    client_side_output_generation=client_side_output_generation,
+                )
+                local_md_dir = Path(result[6])
+                file_name = result[7]
+                await asyncio.to_thread(build_gradio_searchable_pdf_result, local_md_dir, file_name)
+
+                if source_dir is not None and save_next_to_source:
+                    saved_dir = await asyncio.to_thread(
+                        save_batch_result_next_to_source, local_md_dir, source_file
+                    )
+                else:
+                    saved_dir = local_md_dir
+                saved_result_dirs.append(saved_dir)
+                report_lines.append(f"✓ `{source_file.name}` → `{saved_dir}`")
+            except Exception as exc:
+                failed_count += 1
+                logger.exception(f"Batch conversion failed for {source_file}")
+                report_lines.append(f"✗ `{source_file.name}`: {exc}")
+
+            yield (
+                f"**{i18n('batch_progress')}** {index}/{len(files)}",
+                None,
+                "\n".join(report_lines),
+            )
+
+        archive_path = None
+        if saved_result_dirs:
+            archive_parent = source_dir if (source_dir is not None and save_next_to_source) else workspace_root
+            archive_path = archive_parent / f"MinerU_batch_{timestamp}.zip"
+            try:
+                await asyncio.to_thread(create_batch_result_archive, saved_result_dirs, archive_path)
+            except Exception as exc:
+                logger.exception("Failed to create batch result archive")
+                report_lines.append(f"✗ {i18n('batch_archive_error')}: {exc}")
+                archive_path = None
+
+        completed = len(saved_result_dirs)
+        status = i18n('batch_completed') + f": {completed}/{len(files)}"
+        if failed_count:
+            status += f"; {i18n('batch_failed')}: {failed_count}"
+        yield (f"**{status}**", str(archive_path) if archive_path else None, "\n".join(report_lines))
+
     suffixes = [f".{suffix}" for suffix in pdf_suffixes + image_suffixes + office_suffixes]
     _blocks_kwargs = {} if IS_GRADIO_6 else {"css": APP_CSS, "js": APP_JS}
     with gr.Blocks(**_blocks_kwargs) as demo:
@@ -2431,6 +2731,7 @@ def main(ctx,
         # save_content_list_json_edit ниже).
         local_md_dir_state = gr.State(value=None)
         file_name_state = gr.State(value=None)
+        markdown_render_edit_state = gr.State(value=False)
         # Состояния визуального редактора (вкладка "Визуальный редактор"):
         # выбранный блок, текущая страница и флаг "DOCX/PDF устарели после
         # ручной правки" (см. editor_apply_text_edit/editor_apply_table_edit
@@ -2440,11 +2741,48 @@ def main(ctx,
         exports_dirty_state = gr.State(value=False)
         with gr.Row(elem_classes=["mineru-workspace-row"]):
             with gr.Column(variant='panel', scale=2, min_width=280, elem_classes=["mineru-control-column"]):
+                gr.HTML(i18n("upload_file"), elem_classes=["mineru-file-label"])
                 input_file = gr.File(
-                    label=i18n("upload_file"),
+                    container=False,
+                    show_label=False,
                     file_types=suffixes,
                     elem_classes=["mineru-upload-file"],
                 )
+                with gr.Accordion(i18n("batch_title"), open=False, elem_classes=["mineru-batch-panel"]):
+                    gr.HTML(i18n("batch_files"), elem_classes=["mineru-file-label"])
+                    batch_files = gr.File(
+                        container=False,
+                        show_label=False,
+                        file_types=suffixes,
+                        file_count="multiple",
+                        elem_classes=["mineru-batch-files"],
+                    )
+                    batch_source_folder = gr.Textbox(
+                        label=i18n("batch_source_folder"),
+                        info=i18n("batch_source_folder_info"),
+                        placeholder=r"D:\Documents\For recognition",
+                        elem_classes=["mineru-batch-source-folder"],
+                    )
+                    with gr.Row():
+                        batch_recursive = gr.Checkbox(
+                            label=i18n("batch_recursive"), value=False
+                        )
+                        batch_save_next_to_source = gr.Checkbox(
+                            label=i18n("batch_save_next_to_source"), value=True
+                        )
+                    batch_convert_bu = gr.Button(
+                        i18n("batch_convert"), variant="primary", elem_classes=["mineru-batch-convert"]
+                    )
+                    gr.HTML(i18n("batch_result"), elem_classes=["mineru-file-label"])
+                    batch_result_archive = gr.File(
+                        container=False, show_label=False, interactive=False,
+                        elem_classes=["mineru-batch-result"],
+                    )
+                    batch_status = gr.Markdown(value="", elem_classes=["mineru-batch-status"])
+                    batch_report = gr.Code(
+                        label=i18n("batch_report"), language="markdown", interactive=False,
+                        visible=True, elem_classes=["mineru-batch-report"],
+                    )
                 preferred_option = DEFAULT_BACKEND
                 backend = gr.Dropdown(
                     build_backend_choices(http_client_enable, i18n),
@@ -2474,18 +2812,24 @@ def main(ctx,
                 with gr.Row(elem_classes=["mineru-actions"]):
                     change_bu = gr.Button(i18n("convert"), variant="primary", scale=1, min_width=0)
                     clear_bu = gr.ClearButton(value=i18n("clear"), scale=1, min_width=0)
+                gr.HTML(i18n("convert_result"), elem_classes=["mineru-file-label"])
                 output_file = gr.File(
-                    label=i18n("convert_result"),
+                    container=False,
+                    show_label=False,
                     interactive=False,
                     elem_classes=["mineru-result-file"],
                 )
+                gr.HTML(i18n("download_docx"), elem_classes=["mineru-file-label"])
                 output_docx = gr.File(
-                    label=i18n("download_docx"),
+                    container=False,
+                    show_label=False,
                     interactive=False,
                     elem_classes=["mineru-result-docx"],
                 )
+                gr.HTML(i18n("download_searchable_pdf"), elem_classes=["mineru-file-label"])
                 output_searchable_pdf = gr.File(
-                    label=i18n("download_searchable_pdf"),
+                    container=False,
+                    show_label=False,
                     interactive=False,
                     elem_classes=["mineru-result-searchable-pdf"],
                 )
@@ -2505,7 +2849,7 @@ def main(ctx,
                 with gr.Tabs(elem_classes=["mineru-preview-tabs"]):
                     with gr.Tab("Document" if IS_GRADIO_6 else i18n("document_tab_title")):
                         doc_show = PDF(
-                            label=_doc_preview_label,
+                            show_label=False,
                             interactive=False,
                             visible=True,
                             height=pdf_preview_page_height,
@@ -2521,7 +2865,7 @@ def main(ctx,
                     # отобразиться editor_group. Редактор живёт в отдельной вкладке,
                     # поэтому вкладка «Документ» всегда остаётся стабильным просмотром
                     # исходного/размеченного файла.
-                    with gr.Tab(i18n("visual_editor_tab")):
+                    with gr.Tab(i18n("visual_editor_tab")) as visual_editor_tab:
                         with gr.Column(visible=False, elem_classes=["mineru-editor-group"]) as editor_group:
                             with gr.Row(elem_classes=["mineru-editor-nav"]):
                                 editor_prev_bu = gr.Button(
@@ -2544,16 +2888,26 @@ def main(ctx,
                                 i18n("editor_click_hint"),
                                 elem_classes=["mineru-editor-click-hint"],
                             )
-                            # Стрелки и номер страницы уже дают понятную навигацию.
-                            # Галерея миниатюр на широком экране превращалась в
-                            # размытое «непонятное окно» и отнимала место у редактора.
-                            # Оставляем компонент для совместимости с текущими
-                            # обработчиками, но не показываем его в рабочем поле.
-                            editor_thumbnails_gallery = gr.Gallery(
-                                show_label=False,
+                            with gr.Accordion(
+                                i18n("editor_thumbnails_title"),
+                                open=True,
+                                elem_classes=["mineru-editor-thumbnails-accordion"],
+                            ):
+                                editor_thumbnails_gallery = gr.Gallery(
+                                    show_label=False,
+                                    allow_preview=False,
+                                    columns=5,
+                                    rows=3,
+                                    height=280,
+                                    elem_classes=["mineru-editor-thumbnails"],
+                                )
+                            editor_table_picker = gr.Dropdown(
+                                choices=[],
+                                value=None,
+                                label=i18n("editor_table_picker"),
+                                interactive=True,
                                 visible=False,
-                                allow_preview=False,
-                                elem_classes=["mineru-editor-thumbnails"],
+                                elem_classes=["mineru-editor-table-picker"],
                             )
                             _editor_image_kwargs = {"buttons": []} if IS_GRADIO_6 else {
                                 "show_download_button": False,
@@ -2571,14 +2925,38 @@ def main(ctx,
                                         elem_classes=["mineru-editor-page"],
                                         **_editor_image_kwargs,
                                     )
-                                    editor_click_xy = gr.Textbox(
-                                        visible=False,
-                                        elem_id="mineru-editor-click-xy",
-                                    )
-                                    editor_select_trigger = gr.Button(
+                                    # Relay-канал «клик в браузере -> сервер»: обработчик в
+                                    # gradio_app.js пишет JSON с координатами клика (или
+                                    # индексом миниатюры/пункта пикера таблиц) в этот
+                                    # CSS-скрытый textbox и диспатчит нативное событие
+                                    # "input". Прежняя связка «прозрачная кнопка поверх
+                                    # картинки + gr.State + js=-препроцессор» зависела от
+                                    # трёх хрупких звеньев Gradio 6 сразу (геометрия
+                                    # оверлея, elem_id на кнопке, доставка синтетического
+                                    # click в Svelte-делегирование) и в живом браузере не
+                                    # давала даже queue/join.
+                                    #
+                                    # Серверная привязка (ниже, editor_click_relay_tb.change)
+                                    # -- ИМЕННО .change(), не .input(): в gradio@6.8.0
+                                    # Textbox.svelte колбэк .input() вызывается только из
+                                    # обработчика нативного "keypress" (реальные нажатия
+                                    # клавиш), а наш JS шлёт только "input" на программно
+                                    # изменённое значение -- до .input() он в принципе не
+                                    # доходит. .change() же вызывается реактивным эффектом
+                                    # на bind:value при ЛЮБОМ изменении значения независимо
+                                    # от источника -- этим объяснялся живой симптом «relay
+                                    # шлёт корректный JSON в textbox, но ни один клик не
+                                    # уходит на сервер» (обнаружено сверкой с исходником
+                                    # Svelte-компонента, не только логами). Прячем через
+                                    # CSS, а не visible=False, чтобы элемент гарантированно
+                                    # был в DOM.
+                                    editor_click_relay_tb = gr.Textbox(
                                         value="",
-                                        visible=True,
-                                        elem_id="mineru-editor-select-trigger",
+                                        interactive=True,
+                                        show_label=False,
+                                        container=False,
+                                        elem_id="mineru-editor-click-relay",
+                                        elem_classes=["mineru-editor-click-relay"],
                                     )
                                 with gr.Column(scale=2, min_width=290, elem_classes=["mineru-editor-side"]):
                                     with gr.Group(visible=False, elem_classes=["mineru-editor-block-panel"]) as editor_block_panel:
@@ -2603,7 +2981,7 @@ def main(ctx,
                                             visible=False,
                                             elem_classes=["mineru-editor-block-table"],
                                         )
-                                        editor_table_harvest_tb = gr.Textbox(visible=False)
+                                        editor_table_harvest_tb = gr.State(value="")
                                         with gr.Row():
                                             editor_apply_bu = gr.Button(
                                                 i18n("editor_apply_edit"),
@@ -2657,6 +3035,17 @@ def main(ctx,
                 _textarea_copy_kwargs = {"buttons": ["copy"]} if IS_GRADIO_6 else {"show_copy_button": True}
                 with gr.Tabs(elem_classes=["mineru-markdown-tabs"]):
                     with gr.Tab(i18n("md_rendering")):
+                        with gr.Row(elem_classes=["mineru-markdown-render-actions"]):
+                            md_render_edit_bu = gr.Button(
+                                i18n("edit_markdown_rendering"), size="sm", scale=0
+                            )
+                            md_render_save_bu = gr.Button(
+                                i18n("save_markdown_rendering"),
+                                size="sm",
+                                variant="primary",
+                                scale=0,
+                                visible=False,
+                            )
                         md = gr.Markdown(
                             label=i18n("md_rendering"),
                             height=preview_content_height,
@@ -2664,6 +3053,16 @@ def main(ctx,
                             latex_delimiters=latex_delimiters,
                             line_breaks=True,
                             **_md_copy_kwargs
+                        )
+                        md_render_text = gr.Code(
+                            lines=16,
+                            language="markdown",
+                            label=i18n("md_text"),
+                            interactive=True,
+                            wrap_lines=True,
+                            show_label=False,
+                            visible=False,
+                            elem_classes=["mineru-markdown-render-editor"],
                         )
                     with gr.Tab(i18n("md_text")):
                         md_text = gr.Code(
@@ -2767,7 +3166,13 @@ def main(ctx,
             outputs=[is_ocr, formula_enable, backend],
             **_private_api_kwargs
         )
-        clear_bu.add([input_file, md, doc_show, md_text, content_list_json, output_file, output_docx, output_searchable_pdf, is_ocr, office_html, docx_preview_html, status_panel, local_md_dir_state, file_name_state, selected_block_state, editor_page_state, exports_dirty_state])
+        clear_bu.add([
+            input_file, md, doc_show, md_text, content_list_json, output_file, output_docx,
+            output_searchable_pdf, is_ocr, office_html, docx_preview_html, status_panel,
+            local_md_dir_state, file_name_state, selected_block_state, editor_page_state,
+            exports_dirty_state, batch_files, batch_source_folder, batch_recursive,
+            batch_save_next_to_source, batch_result_archive, batch_status, batch_report,
+        ])
 
         def reset_primary_ui():
             """清除主界面状态。高级气泡由前端点击外部逻辑自动收起。"""
@@ -2833,6 +3238,26 @@ def main(ctx,
             outputs=[status_panel, output_file, md, md_text, content_list_json, doc_show, output_docx, docx_preview_pdf, docx_preview_html, output_searchable_pdf, local_md_dir_state, file_name_state],
             **_to_md_api_kwargs
         )
+        batch_convert_bu.click(
+            fn=convert_batch_to_markdown_stream,
+            inputs=[
+                batch_files,
+                batch_source_folder,
+                batch_recursive,
+                batch_save_next_to_source,
+                max_pages,
+                is_ocr,
+                formula_enable,
+                table_enable,
+                image_analysis,
+                hybrid_effort,
+                language,
+                backend,
+                url,
+            ],
+            outputs=[batch_status, batch_result_archive, batch_report],
+            **_to_md_api_kwargs,
+        )
 
         def save_md_text_edit(md_text_value, local_md_dir, file_name, request: gr.Request = None):
             """Сохраняет отредактированный текст Markdown на диск и обновляет вкладку рендеринга."""
@@ -2866,6 +3291,34 @@ def main(ctx,
                 render_save_status_html(
                     i18n, "save_md_success", locale=request_locale, detail=f" ({timestamp})"
                 ),
+            )
+
+        def toggle_markdown_render_edit(md_text_value, is_editing):
+            """Открывает исходник под рендерингом, не скрывая предпросмотр таблиц."""
+            editing = not bool(is_editing)
+            return (
+                gr.update(visible=True, height=420 if editing else preview_content_height),
+                gr.update(value=md_text_value or "", visible=editing),
+                gr.update(
+                    value=i18n("close_markdown_editor") if editing else i18n("edit_markdown_rendering")
+                ),
+                gr.update(visible=editing),
+                editing,
+            )
+
+        def save_markdown_render_edit(md_text_value, local_md_dir, file_name, request: gr.Request = None):
+            """Сохраняет правку, сразу перерисовывая таблицы над открытым исходником."""
+            rendered_md, status = save_md_text_edit(
+                md_text_value, local_md_dir, file_name, request
+            )
+            return (
+                gr.update(value=rendered_md, visible=True, height=420),
+                gr.update(value=md_text_value or ""),
+                gr.update(value=md_text_value or "", visible=True),
+                gr.update(value=i18n("close_markdown_editor")),
+                gr.update(visible=True),
+                True,
+                status,
             )
 
         def save_content_list_json_edit(content_list_json_value, local_md_dir, file_name, request: gr.Request = None):
@@ -2902,6 +3355,32 @@ def main(ctx,
             inputs=[md_text, local_md_dir_state, file_name_state],
             outputs=[md, status_panel],
             **_private_api_kwargs
+        )
+        md_render_edit_bu.click(
+            fn=toggle_markdown_render_edit,
+            inputs=[md_text, markdown_render_edit_state],
+            outputs=[
+                md,
+                md_render_text,
+                md_render_edit_bu,
+                md_render_save_bu,
+                markdown_render_edit_state,
+            ],
+            **_private_api_kwargs,
+        )
+        md_render_save_bu.click(
+            fn=save_markdown_render_edit,
+            inputs=[md_render_text, local_md_dir_state, file_name_state],
+            outputs=[
+                md,
+                md_text,
+                md_render_text,
+                md_render_edit_bu,
+                md_render_save_bu,
+                markdown_render_edit_state,
+                status_panel,
+            ],
+            **_private_api_kwargs,
         )
         save_content_list_json_bu.click(
             fn=save_content_list_json_edit,
@@ -3007,6 +3486,57 @@ def main(ctx,
                 ) + _editor_panel_closed()
             return (overlay_img, label_html, "", 0, None) + _editor_panel_closed()
 
+        def _editor_table_selection_keys(middle_json):
+            """Ключи ``page::selection_id`` всех таблиц документа в едином
+            детерминированном порядке обхода. Общий источник и для choices
+            пикера, и для fallback по ``SelectData.index`` в обработчике
+            выбора -- индекс пункта в списке гарантированно бьётся с ключом."""
+            keys = []
+            pages = middle_json.get("pdf_info") or []
+            for page_idx in range(len(pages)):
+                for block in visual_editor.list_page_blocks(middle_json, page_idx):
+                    if block.get("kind") != "table":
+                        continue
+                    keys.append(f"{page_idx}::{block['selection_id']}")
+            return keys
+
+        def _build_editor_table_picker_update(local_md_dir, file_name, locale=None):
+            """Строит надёжный список таблиц как альтернативу точному клику по странице.
+
+            Текст choices резолвится на сервере через translate_ui: объект
+            ``i18n(...)`` внутри f-строки сериализуется в сырой маркер
+            ``__i18n__{...}`` -- фронтенд Gradio подменяет такие маркеры только
+            когда ими является ВСЯ строка, поэтому в списке был виден мусор
+            вида ``__i18n__{"__type__": ...} 5 — таблица 1`` в две строки
+            (и из-за переноса плыл hit-box пунктов дропдауна)."""
+            try:
+                middle_json = visual_editor.load_middle_json(local_md_dir, file_name)
+                page_word = translate_ui(i18n, "editor_page_word", locale)
+                table_word = translate_ui(i18n, "editor_table_word", locale)
+                choices = []
+                for table_number, key in enumerate(
+                    _editor_table_selection_keys(middle_json), start=1
+                ):
+                    page_value = key.split("::", 1)[0]
+                    choices.append(
+                        (
+                            f"{page_word} {int(page_value) + 1} — {table_word} {table_number}",
+                            key,
+                        )
+                    )
+                return gr.update(choices=choices, value=None, visible=bool(choices))
+            except Exception as exc:
+                logger.warning(f"Failed to build editor table picker for {file_name}: {exc}")
+                return gr.update(choices=[], value=None, visible=False)
+
+        def _build_editor_thumbnails_update(local_md_dir, file_name):
+            """Свежая лента миниатюр текущего документа (или пустая при сбое)."""
+            try:
+                return gr.update(value=visual_editor.list_thumbnails(local_md_dir, file_name))
+            except Exception as exc:
+                logger.warning(f"Failed to build editor thumbnails for {file_name}: {exc}")
+                return gr.update(value=[])
+
         def post_convert_document_view(local_md_dir, file_name, request: gr.Request = None):
             """Готовит отдельную вкладку визуального редактора после конвертации.
 
@@ -3020,16 +3550,15 @@ def main(ctx,
             )
             if has_origin:
                 editor_group_update = gr.update(visible=True)
-                try:
-                    thumbnails = visual_editor.list_thumbnails(local_md_dir, file_name)
-                except Exception as exc:
-                    logger.warning(f"Failed to build editor thumbnails for {file_name}: {exc}")
-                    thumbnails = []
-                gallery_update = gr.update(value=thumbnails)
+                gallery_update = _build_editor_thumbnails_update(local_md_dir, file_name)
+                table_picker_update = _build_editor_table_picker_update(
+                    local_md_dir, file_name, resolve_request_locale(request)
+                )
             else:
                 editor_group_update = gr.update(visible=False)
                 gallery_update = gr.update(value=[])
-            return editor_outputs + (editor_group_update, gallery_update)
+                table_picker_update = gr.update(choices=[], value=None, visible=False)
+            return editor_outputs + (editor_group_update, gallery_update, table_picker_update)
 
         # Привязка отложена сюда, т.к. _editor_view_outputs/post_convert_document_view
         # объявляются только в этой секции, уже после change_bu.click(...) выше.
@@ -3049,10 +3578,104 @@ def main(ctx,
             if IS_GRADIO_6
             else {"api_name": False, "queue": True, "show_progress": "hidden"}
         )
+
+        def open_visual_editor_tab(
+            local_md_dir, file_name, current_page_idx, selected, request: gr.Request = None
+        ):
+            """Загружает редактор именно при открытии вкладки.
+
+            Инициализация после конвертации может прийти в браузер раньше,
+            чем Gradio смонтирует скрытую вкладку. Повторная, дешёвая загрузка
+            по событию ``Tab.select`` устраняет пустую вкладку без повторного
+            распознавания документа.
+
+            Возврат на вкладку НЕ сбрасывает страницу и выделение: полный
+            сброс на страницу 0 делает только ``post_convert_document_view``
+            после новой конвертации (единственный путь, меняющий
+            ``local_md_dir_state``). Раньше безусловный ``init_visual_editor``
+            откатывал редактор на страницу 0 при каждом входе -- пользователь,
+            вернувшийся с другой вкладки, кликал по "своей" странице, а
+            состояние уже указывало на первую.
+            """
+            request_locale = resolve_request_locale(request)
+            visible = bool(
+                local_md_dir and file_name and visual_editor.has_origin_pdf(local_md_dir, file_name)
+            )
+            table_picker_update = (
+                _build_editor_table_picker_update(local_md_dir, file_name, request_locale)
+                if visible
+                else gr.update(choices=[], value=None, visible=False)
+            )
+            # Ленту миниатюр перестраиваем и при каждом входе на вкладку: апдейт
+            # галереи из post_convert_document_view (13 разнородных выходов на
+            # скрытую вкладку) на клиенте применяется ненадёжно -- живой симптом:
+            # после конвертации НОВОГО документа лента оставалась от старого.
+            # Вкладочный рендер -- гарантированный ремонтный путь.
+            thumbnails_update = (
+                _build_editor_thumbnails_update(local_md_dir, file_name)
+                if visible
+                else gr.update(value=[])
+            )
+            if not visible:
+                editor_outputs = init_visual_editor(local_md_dir, file_name, request)
+                return editor_outputs + (
+                    gr.update(visible=False), thumbnails_update, table_picker_update
+                )
+            try:
+                total_pages = visual_editor.page_count(local_md_dir, file_name)
+                page_idx = max(0, min(max(total_pages - 1, 0), int(current_page_idx or 0)))
+                selected_valid = False
+                if isinstance(selected, dict) and selected.get("page_idx") == page_idx:
+                    middle_json = visual_editor.load_middle_json(local_md_dir, file_name)
+                    blocks = visual_editor.list_page_blocks(middle_json, page_idx)
+                    selected_valid = any(
+                        b["block_idx"] == selected.get("block_idx")
+                        and b["source"] == selected.get("source", "para_blocks")
+                        for b in blocks
+                    )
+                overlay_img, label_html = _render_editor_page(
+                    local_md_dir,
+                    file_name,
+                    page_idx,
+                    selected if selected_valid else None,
+                    request_locale,
+                )
+            except Exception as exc:
+                logger.warning(f"Failed to restore visual editor state for {file_name}: {exc}")
+                editor_outputs = init_visual_editor(local_md_dir, file_name, request)
+                return editor_outputs + (
+                    gr.update(visible=True), thumbnails_update, table_picker_update
+                )
+            # Панель блока не трогаем при живом выделении (gr.skip) -- её
+            # содержимое уже показывает выбранный блок; при потерянном
+            # выделении закрываем, чтобы панель не показывала чужой текст.
+            panel_updates = (gr.skip(),) * 5 if selected_valid else _editor_panel_closed()
+            return (
+                overlay_img,
+                label_html,
+                gr.skip(),
+                page_idx,
+                selected if selected_valid else None,
+            ) + panel_updates + (
+                gr.update(visible=True), thumbnails_update, table_picker_update
+            )
+
         _change_bu_click_event.then(
             fn=post_convert_document_view,
             inputs=[local_md_dir_state, file_name_state],
-            outputs=_editor_view_outputs + [editor_group, editor_thumbnails_gallery],
+            outputs=_editor_view_outputs + [editor_group, editor_thumbnails_gallery, editor_table_picker],
+            **_editor_view_api_kwargs,
+        )
+        # Оба события пишут в _editor_view_outputs, но гонка неопасна:
+        # open_visual_editor_tab теперь не деструктивен (рендерит из текущих
+        # состояний), а единственный деструктивный сброс -- post_convert_document_view
+        # -- всегда последний писатель после конвертации.
+        visual_editor_tab.select(
+            fn=open_visual_editor_tab,
+            inputs=[local_md_dir_state, file_name_state, editor_page_state, selected_block_state],
+            outputs=_editor_view_outputs + [
+                editor_group, editor_thumbnails_gallery, editor_table_picker
+            ],
             **_editor_view_api_kwargs,
         )
 
@@ -3192,11 +3815,19 @@ def main(ctx,
 
             if kind == "text":
                 text_value = visual_editor.get_block_text(raw_block)
-                return (overlay_img, label_html, "", page_idx, selected) + _editor_panel_text(
+                return (
+                    overlay_img,
+                    label_html,
+                    render_save_status_html(i18n, "editor_block_selected", locale=request_locale),
+                    page_idx,
+                    selected,
+                ) + _editor_panel_text(
                     text_value, snippet_img
                 )
             if kind == "table":
-                table_span = visual_editor.find_table_span(raw_block)
+                table_span = visual_editor.recover_table_span_from_model(
+                    local_md_dir, file_name, page_idx, raw_block, page_size
+                )
                 if not table_span:
                     return (
                         overlay_img,
@@ -3208,7 +3839,13 @@ def main(ctx,
                         None,
                     ) + _editor_panel_closed()
                 table_html_value = visual_editor.make_editable_table_html(table_span["html"])
-                return (overlay_img, label_html, "", page_idx, selected) + _editor_panel_table(
+                return (
+                    overlay_img,
+                    label_html,
+                    render_save_status_html(i18n, "editor_block_selected", locale=request_locale),
+                    page_idx,
+                    selected,
+                ) + _editor_panel_table(
                     table_html_value, snippet_img
                 )
 
@@ -3224,10 +3861,20 @@ def main(ctx,
         def editor_image_coordinate_select(
             click_xy_json, local_md_dir, file_name, page_idx, request: gr.Request = None
         ):
-            """Выбирает блок по координатам из браузерного обработчика клика.
+            """Диспетчер relay-канала кликов из ``gradio_app.js``.
 
-            В отличие от ``gr.Image.select`` этот путь не зависит от внутреннего
-            события Gradio 6, которое не приходит на части рендеров ``Image``.
+            Payload -- JSON из скрытого textbox: ``{"x":..,"y":..,"t":..}`` --
+            клик по странице (hit-test блока), ``{"thumb":N,"t":..}`` -- клик по
+            миниатюре (абсолютный переход на страницу N), ``{"table_option_index":N,"t":..}``
+            -- выбор пункта в пикере таблиц по позиции в исходном (нефильтрованном)
+            списке choices (``data-index`` пункта Dropdown -- см. комментарий у JS
+            mousedown-обработчика). Поле ``t`` -- nonce, гарантирующий изменение
+            значения textbox (без него повторный клик в ту же точку/миниатюру не
+            рождал бы событие input). В отличие от ``gr.Image.select``/
+            ``gr.Gallery.select``/``gr.Dropdown.change`` этот путь не зависит от
+            внутренних событий Gradio 6, которые не приходят на части рендеров
+            (у Gallery часть кликов давала ноль событий, часть -- два; у пикера
+            таблиц значение визуально менялось, но ``.change`` не долетал вовсе).
             """
             request_locale = resolve_request_locale(request)
             if not local_md_dir or not file_name:
@@ -3241,11 +3888,52 @@ def main(ctx,
                     None,
                 ) + _editor_panel_closed()
             try:
+                click_payload = json.loads(click_xy_json or "")
+                if "thumb" in click_payload:
+                    total_pages = visual_editor.page_count(local_md_dir, file_name)
+                    target_idx = max(
+                        0, min(max(total_pages - 1, 0), int(click_payload["thumb"]))
+                    )
+                    overlay_img, label_html = _render_editor_page(
+                        local_md_dir, file_name, target_idx, None, request_locale
+                    )
+                    return (
+                        overlay_img, label_html, "", target_idx, None
+                    ) + _editor_panel_closed()
+                if "table_option_index" in click_payload:
+                    middle_json = visual_editor.load_middle_json(local_md_dir, file_name)
+                    keys = _editor_table_selection_keys(middle_json)
+                    option_idx = int(click_payload["table_option_index"])
+                    if option_idx < 0 or option_idx >= len(keys):
+                        raise ValueError(f"Table picker index out of range: {option_idx}")
+                    table_page_value, table_selection_id = keys[option_idx].split("::", 1)
+                    try:
+                        return _select_block_outputs(
+                            local_md_dir,
+                            file_name,
+                            int(table_page_value),
+                            table_selection_id,
+                            request_locale,
+                        )
+                    except Exception:
+                        logger.exception(f"Editor table picker selection failed for {file_name}")
+                        return (
+                            gr.skip(),
+                            gr.skip(),
+                            render_save_status_html(
+                                i18n,
+                                "editor_load_error",
+                                locale=request_locale,
+                                detail=f" ({time.strftime('%H:%M:%S')})",
+                                is_error=True,
+                            ),
+                            page_idx,
+                            None,
+                        ) + _editor_panel_closed()
                 middle_json = visual_editor.load_middle_json(local_md_dir, file_name)
                 blocks = visual_editor.list_page_blocks(middle_json, page_idx)
                 page_size = visual_editor.get_page_size(middle_json, page_idx)
                 base_img = visual_editor.render_page_base(local_md_dir, file_name, page_idx)
-                click_payload = json.loads(click_xy_json or "")
                 click_xy = (float(click_payload["x"]), float(click_payload["y"]))
                 found_idx = visual_editor.hit_test(
                     blocks, page_size, base_img.size, click_xy[0], click_xy[1]
@@ -3267,9 +3955,72 @@ def main(ctx,
 
             if found_idx is None:
                 overlay_img = visual_editor.draw_overlay(base_img, blocks, page_size, None)
-                return (overlay_img, label_html, "", page_idx, None) + _editor_panel_closed()
+                # Статус обязан быть непустым и меняющимся: клиентский спиннер
+                # "Загрузка выбранного блока…" снимается MutationObserver'ом по
+                # изменению DOM статуса. Пустая строка при прежнем пустом
+                # значении не даёт мутации -- спиннер зависал, а клик выглядел
+                # как "ничего не произошло".
+                miss_status = render_save_status_html(
+                    i18n,
+                    "editor_no_block_at_click",
+                    locale=request_locale,
+                    detail=f" ({time.strftime('%H:%M:%S')})",
+                    is_error=True,
+                )
+                return (overlay_img, label_html, miss_status, page_idx, None) + _editor_panel_closed()
 
-            return _select_block_outputs(local_md_dir, file_name, page_idx, found_idx, request_locale)
+            # Успешный hit-test раньше уходил в _select_block_outputs БЕЗ
+            # try/except: любое исключение внутри (recover_table_span_from_model,
+            # сборка HTML таблицы и т.п.) оставалось необработанным -- клиент
+            # видел «join ушёл, панель не открылась» без какой-либо ошибки в UI.
+            # Пока relay-канал не работал, эта ветка была недостижима и дыра
+            # не проявлялась.
+            try:
+                return _select_block_outputs(
+                    local_md_dir, file_name, page_idx, found_idx, request_locale
+                )
+            except Exception:
+                logger.exception(f"Editor block selection failed for {file_name}")
+                return (
+                    gr.skip(),
+                    gr.skip(),
+                    render_save_status_html(
+                        i18n,
+                        "editor_load_error",
+                        locale=request_locale,
+                        detail=f" ({time.strftime('%H:%M:%S')})",
+                        is_error=True,
+                    ),
+                    page_idx,
+                    None,
+                ) + _editor_panel_closed()
+
+        def editor_table_picker_select(table_key, local_md_dir, file_name, request: gr.Request = None):
+            """Открывает таблицу из обычного списка, не зависящего от Image.click в Gradio."""
+            request_locale = resolve_request_locale(request)
+            if not table_key or not local_md_dir or not file_name:
+                # .change срабатывает и на программный сброс value=None при
+                # входе на вкладку/после конвертации -- раньше здесь был
+                # editor_deselect(..., 0, ...), который скрыто откатывал
+                # редактор на страницу 0. Пустой выбор -- всегда no-op.
+                return (gr.skip(),) * len(_editor_view_outputs)
+            try:
+                page_value, selection_id = str(table_key).split("::", 1)
+                page_idx = int(page_value)
+                return _select_block_outputs(
+                    local_md_dir, file_name, page_idx, selection_id, request_locale
+                )
+            except Exception as exc:
+                logger.warning(f"Failed to select table from picker for {file_name}: {exc}")
+                return (
+                    gr.skip(),
+                    gr.skip(),
+                    render_save_status_html(
+                        i18n, "editor_load_error", locale=request_locale, detail=f": {exc}", is_error=True
+                    ),
+                    0,
+                    None,
+                ) + _editor_panel_closed()
 
         def editor_next_suspect(local_md_dir, file_name, page_idx, selected, request: gr.Request = None):
             """Ищет следующий блок с низким score (min_score < threshold) и
@@ -3286,6 +4037,12 @@ def main(ctx,
                 ) + _editor_panel_closed()
             try:
                 middle_json = visual_editor.load_middle_json(local_md_dir, file_name)
+                if not visual_editor.has_confidence_scores(middle_json):
+                    return (
+                        gr.skip(), gr.skip(),
+                        render_save_status_html(i18n, "editor_suspect_unavailable", locale=request_locale),
+                        page_idx, None,
+                    ) + _editor_panel_closed()
                 start_block_idx = (
                     selected.get("block_idx")
                     if selected and selected.get("page_idx") == page_idx
@@ -3307,14 +4064,28 @@ def main(ctx,
                     render_save_status_html(i18n, "editor_no_suspects", locale=request_locale),
                     page_idx, None,
                 ) + _editor_panel_closed()
-            next_page_idx, next_block_idx = result
-            return _select_block_outputs(
-                local_md_dir,
-                file_name,
-                next_page_idx,
-                f"para_blocks:{next_block_idx}",
-                request_locale,
-            )
+            next_page_idx, next_selection_id = result
+            try:
+                return _select_block_outputs(
+                    local_md_dir,
+                    file_name,
+                    next_page_idx,
+                    next_selection_id,
+                    request_locale,
+                )
+            except Exception:
+                logger.exception(f"Editor suspect selection failed for {file_name}")
+                return (
+                    gr.skip(), gr.skip(),
+                    render_save_status_html(
+                        i18n,
+                        "editor_load_error",
+                        locale=request_locale,
+                        detail=f" ({time.strftime('%H:%M:%S')})",
+                        is_error=True,
+                    ),
+                    page_idx, None,
+                ) + _editor_panel_closed()
 
         def _refresh_editor_tabs_after_edit(local_md_dir, file_name):
             """Перечитывает .md/content_list.json с диска после regenerate_derived_outputs."""
@@ -3419,8 +4190,12 @@ def main(ctx,
             block_idx = selected["block_idx"]
             try:
                 middle_json = visual_editor.load_middle_json(local_md_dir, file_name)
-                block = middle_json["pdf_info"][page_idx]["para_blocks"][block_idx]
-                table_span = visual_editor.find_table_span(block)
+                source = selected.get("source", "para_blocks")
+                block = middle_json["pdf_info"][page_idx][source][block_idx]
+                page_size = visual_editor.get_page_size(middle_json, page_idx)
+                table_span = visual_editor.recover_table_span_from_model(
+                    local_md_dir, file_name, page_idx, block, page_size
+                )
                 if not table_span:
                     raise ValueError("Table span not found in the selected block")
                 new_html = visual_editor.apply_table_edit(table_span["html"], harvested_html or "")
@@ -3606,16 +4381,42 @@ def main(ctx,
             outputs=_editor_view_outputs,
             **_editor_view_api_kwargs,
         )
-        editor_select_trigger.click(
+        # Relay-канал кликов: JS пишет JSON в скрытый textbox и диспатчит
+        # событие DOM "input". Привязка -- .change(), НЕ .input(): в
+        # gradio@6.8.0 js/textbox/shared/Textbox.svelte GRADIO-уровневый
+        # колбэк oninput?.(value) (тот, что в итоге вызывает Python-обработчик
+        # .input()) вызывается ТОЛЬКО из handle_keypress -- обработчика
+        # нативного события "keypress", т.е. только на реальное нажатие
+        # клавиши. Наш JS никогда не шлёт keypress, только программно меняет
+        # .value и диспатчит "input" -- это доходит до Svelte bind:value
+        # (обновляет DOM/реактивное состояние), но НЕ доходит до oninput
+        # Гradio. handle_change() (реактивный эффект на bind:value, который
+        # срабатывает при ЛЮБОМ изменении значения независимо от источника)
+        # вызывает onchange?.(value) -- источник Python .change(). Отсюда и
+        # был симптом «relay визуально работал (клик распознавался, JSON
+        # писался в textbox), но ни одного queue/join не уходило»: колбэк на
+        # который был подписан Python, физически не мог быть вызван нашим
+        # способом взаимодействия с полем.
+        editor_click_relay_tb.change(
             fn=editor_image_coordinate_select,
-            inputs=[editor_click_xy, local_md_dir_state, file_name_state, editor_page_state],
+            inputs=[editor_click_relay_tb, local_md_dir_state, file_name_state, editor_page_state],
             outputs=_editor_view_outputs,
-            js="(xy, d, f, p) => [window.__mineruEditorClickXY || xy || '', d, f, p]",
             **_editor_view_api_kwargs,
         )
+        # Родное Gallery.select остаётся резервным путём: обработчик в
+        # gradio_app.js глушит клик по миниатюре (capture) и шлёт его через
+        # relay; сюда событие доходит только если relay-канал недоступен
+        # (например, скрипт не загрузился) -- тогда работает штатный, пусть и
+        # нестабильный в Gradio 6, путь.
         editor_thumbnails_gallery.select(
             fn=editor_thumbnail_select,
             inputs=[local_md_dir_state, file_name_state],
+            outputs=_editor_view_outputs,
+            **_editor_view_api_kwargs,
+        )
+        editor_table_picker.change(
+            fn=editor_table_picker_select,
+            inputs=[editor_table_picker, local_md_dir_state, file_name_state],
             outputs=_editor_view_outputs,
             **_editor_view_api_kwargs,
         )

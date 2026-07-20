@@ -709,7 +709,7 @@
         }
     });
 
-    const EDITOR_ZOOM_SCRIPT_VERSION = "editor-zoom-v2";
+    const EDITOR_ZOOM_SCRIPT_VERSION = "editor-zoom-v9";
     if (window.__mineruEditorZoomInstalled !== EDITOR_ZOOM_SCRIPT_VERSION) {
         window.__mineruEditorZoomInstalled = EDITOR_ZOOM_SCRIPT_VERSION;
 
@@ -719,7 +719,15 @@
         let editorZoomState = { scale: 1, tx: 0, ty: 0 };
         let editorPanState = null;
 
-        const findEditorPageEl = (target) => (target && target.closest ? target.closest(".mineru-editor-page") : null);
+        const findEditorPageEl = (target) => {
+            if (!target || !target.closest) return null;
+            // Клик может прийти и по служебным элементам холста рядом с
+            // изображением — тогда находим общий холст, а уже в нём реальное
+            // изображение страницы.
+            return target.closest(".mineru-editor-page")
+                || target.closest(".mineru-editor-canvas")?.querySelector(".mineru-editor-page")
+                || null;
+        };
 
         const applyEditorZoomVars = (container) => {
             container.style.setProperty("--mineru-ez-scale", String(editorZoomState.scale));
@@ -772,17 +780,33 @@
             zoomEditorAt(container, rect.left + rect.width / 2, rect.top + rect.height / 2, 2);
         };
 
-        document.addEventListener("wheel", (event) => {
+        // window + capture:true (не document, не bubble): Svelte 5 не делегирует
+        // wheel/pointer/touch через общий root-листенер -- он навешивает их
+        // напрямую на элемент, который объявил `on:wheel` (после микрозадачи,
+        // um-баг склонирования нод в Chrome, см. Svelte's create_event). Если у
+        // компонента Gradio Image/Gallery есть собственный wheel-обработчик
+        // где-то внутри `.mineru-editor-page` (даже просто "не скроллить
+        // страницу под курсором"), он мог вызывать stopPropagation() в bubble
+        // ДО того, как событие поднималось к document -- наш прежний
+        // document-bubble листенер тогда никогда не получал событие. window +
+        // capture гарантированно перехватывает раньше любого такого
+        // обработчика, независимо от порядка регистрации и фазы.
+        window.addEventListener("wheel", (event) => {
             const container = findEditorPageEl(event.target);
             if (!container) return;
             event.preventDefault();
             const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
             zoomEditorAt(container, event.clientX, event.clientY, editorZoomState.scale * factor);
-        }, { passive: false });
+        }, { passive: false, capture: true });
 
         document.addEventListener("pointerdown", (event) => {
             const container = findEditorPageEl(event.target);
             if (!container || event.button !== 0) return;
+            // Пан имеет смысл только при зуме. Без зума не захватываем указатель
+            // вовсе -- иначе setPointerCapture ретаргетит pointerup/click мимо
+            // обычного клика по странице (кликовый relay читает event.target
+            // напрямую, но capture ломает bubbling к document-обработчику ниже).
+            if (editorZoomState.scale <= EDITOR_ZOOM_MIN) return;
             editorPanState = {
                 startX: event.clientX,
                 startY: event.clientY,
@@ -823,7 +847,17 @@
         document.addEventListener("pointerup", endEditorPan);
         document.addEventListener("pointercancel", endEditorPan);
 
-        document.addEventListener("click", (event) => {
+        // window, не document: если Svelte делегирует "click" через собственный
+        // root-листенер на document в capture-фазе, зарегистрированный РАНЬШЕ
+        // нашего (Gradio монтируется как module-скрипт, который по спецификации
+        // отрабатывает до DOMContentLoaded -- события которого ждёт весь этот
+        // файл), внутренний обработчик клика Gradio мог синхронно выставить
+        // event.defaultPrevented/stopPropagation ДО того, как наш листенер на
+        // document вообще успевал сработать -- следующие проверки
+        // `if (event.defaultPrevented) return;` во всех click-листенерах ниже
+        // тогда всегда гасили клик. window -- гарантированно более ранний узел
+        // capture-цепочки, чем document, независимо от порядка регистрации.
+        window.addEventListener("click", (event) => {
             if (event.defaultPrevented) return;
             const container = findEditorPageEl(event.target);
             if (container && container.__mineruSuppressNextClick) {
@@ -833,9 +867,77 @@
             }
         }, true); // capture — раньше внутреннего click-обработчика Gradio Image .select()
 
-        // Gradio 6 периодически не испускает Image.select() для уже
-        // отрендеренного сервером изображения. Сохраняем координаты локально,
-        // а обычная Button.click() передаёт их серверному обработчику через js=.
+        // Gradio 6 периодически не испускает Image.select()/Gallery.select()
+        // для уже отрендеренного сервером содержимого. Все клики редактора
+        // уходят на сервер через relay: CSS-скрытый gr.Textbox, в который мы
+        // пишем JSON и диспатчим нативное событие "input".
+        //
+        // ВАЖНО (source-verified на gradio@6.8.0 js/textbox/shared/Textbox.svelte):
+        // это событие обновляет Svelte bind:value (реактивное состояние
+        // компонента) -- и ТОЛЬКО его. Gradio-колбэк oninput?.(value),
+        // который вызывает Python .input(), живёт исключительно внутри
+        // handle_keypress (обработчик нативного "keypress", т.е. реальных
+        // нажатий клавиш) -- программный "input" до него в принципе не
+        // доходит. А вот handle_change() -- реактивный эффект на bind:value,
+        // срабатывающий на ЛЮБОЕ изменение значения независимо от источника
+        // -- вызывает onchange?.(value), источник Python .change(). Поэтому
+        // серверная привязка ниже подписана через .change(), не .input()
+        // (см. editor_click_relay_tb.change(...) в gradio_app.py).
+        const findEditorRelayInput = () => {
+            const relayRoot = document.querySelector("#mineru-editor-click-relay")
+                || document.querySelector(".mineru-editor-click-relay");
+            if (!relayRoot) return null;
+            if (relayRoot instanceof HTMLTextAreaElement || relayRoot instanceof HTMLInputElement) {
+                return relayRoot;
+            }
+            return relayRoot.querySelector("textarea, input");
+        };
+        const sendEditorRelayPayload = (payload) => {
+            const relayInput = findEditorRelayInput();
+            if (!relayInput) return false;
+            // Nonce t гарантирует изменение значения textbox: без него повторный
+            // клик в ту же точку/миниатюру не менял value и событие не рождалось.
+            const nextValue = JSON.stringify({ ...payload, t: Date.now() });
+            const proto = relayInput instanceof HTMLTextAreaElement
+                ? HTMLTextAreaElement.prototype
+                : HTMLInputElement.prototype;
+            const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+            if (setter) {
+                setter.call(relayInput, nextValue);
+            } else {
+                relayInput.value = nextValue;
+            }
+            relayInput.dispatchEvent(new Event("input", { bubbles: true }));
+            return true;
+        };
+        const getEditorStatusTarget = () => {
+            const statusRoot = document.querySelector("#mineru-editor-status");
+            return statusRoot?.querySelector(".html-container, .prose") || statusRoot;
+        };
+        const clearEditorBlockPending = (clearPendingStatus = false) => {
+            document.querySelectorAll(".mineru-editor-pending-marker").forEach((marker) => marker.remove());
+            if (window.__mineruEditorPendingMarkerTimer) {
+                window.clearTimeout(window.__mineruEditorPendingMarkerTimer);
+                window.__mineruEditorPendingMarkerTimer = null;
+            }
+            window.__mineruEditorSelectionPending = false;
+            if (clearPendingStatus) {
+                const statusTarget = getEditorStatusTarget();
+                if (statusTarget?.querySelector(".mineru-editor-pending-status")) {
+                    statusTarget.innerHTML = "";
+                }
+            }
+        };
+        // Сервер возвращает непустимый статус после выбора блока. Наблюдатель
+        // снимает локальный индикатор и для ошибок, и для успешного выбора.
+        // Тайм-аут остаётся страховкой от потерянного события Gradio.
+        new MutationObserver(() => {
+            const statusTarget = getEditorStatusTarget();
+            if (statusTarget && !statusTarget.querySelector(".mineru-editor-pending-status")) {
+                clearEditorBlockPending(false);
+            }
+        }).observe(document.body, { childList: true, subtree: true });
+
         const showEditorBlockPending = (container, image, clientX, clientY) => {
             document.querySelectorAll(".mineru-editor-pending-marker").forEach((marker) => marker.remove());
             if (window.__mineruEditorPendingMarkerTimer) {
@@ -847,11 +949,15 @@
             marker.style.left = `${clientX - containerRect.left}px`;
             marker.style.top = `${clientY - containerRect.top}px`;
             container.append(marker);
-            window.__mineruEditorPendingMarkerTimer = window.setTimeout(() => marker.remove(), 15000);
-            image.addEventListener("load", () => marker.remove(), { once: true });
+            window.__mineruEditorSelectionPending = true;
+            window.__mineruEditorSelectionPendingAt = Date.now();
+            window.__mineruEditorPendingMarkerTimer = window.setTimeout(
+                () => clearEditorBlockPending(true),
+                8000,
+            );
+            image.addEventListener("load", () => clearEditorBlockPending(false), { once: true });
 
-            const statusRoot = document.querySelector("#mineru-editor-status");
-            const statusTarget = statusRoot?.querySelector(".html-container, .prose") || statusRoot;
+            const statusTarget = getEditorStatusTarget();
             if (statusTarget) {
                 statusTarget.innerHTML = (
                     '<div class="mineru-editor-pending-status">'
@@ -861,7 +967,15 @@
                 );
             }
         };
-        document.addEventListener("click", (event) => {
+        // window, не document — см. комментарий у листенера endEditorPan выше:
+        // если фреймворк успевает выставить defaultPrevented на document раньше
+        // нас, любой document-capture листенер этого файла молча съедал бы
+        // клик прямо на первой строке. Live-тест подтвердил симптом (0
+        // сетевых запросов и пустая консоль даже для валидного клика по
+        // таблице) именно с document — на window та же проверка стала
+        // информативной: она гасит только НАШ собственный флаг после
+        // панорамирования, выставленный listenerʼом endEditorPan чуть выше.
+        window.addEventListener("click", (event) => {
             if (event.defaultPrevented) return;
             const container = findEditorPageEl(event.target);
             const image = container && (
@@ -886,13 +1000,103 @@
             const x = (event.clientX - renderedLeft) / displayScale;
             const y = (event.clientY - renderedTop) / displayScale;
             if (x < 0 || y < 0 || x > image.naturalWidth || y > image.naturalHeight) return;
-            const trigger = document.querySelector("#mineru-editor-select-trigger button, #mineru-editor-select-trigger");
-            if (!trigger) return;
+            // Латч гасит только быстрый дабл-клик (<1.5 c), а не блокирует клики
+            // до сброса флага: залипший флаг молча съедал бы все клики. Повторный
+            // запрос на сервер безопасен: обработчик выбора идемпотентен.
+            if (
+                window.__mineruEditorSelectionPending
+                && Date.now() - (window.__mineruEditorSelectionPendingAt || 0) < 1500
+            ) return;
+            if (!findEditorRelayInput()) return; // relay ещё не смонтирован — не глушим клик
             event.preventDefault();
             event.stopImmediatePropagation();
             showEditorBlockPending(container, image, event.clientX, event.clientY);
-            window.__mineruEditorClickXY = JSON.stringify({ x, y });
-            window.setTimeout(() => trigger.click(), 0);
+            sendEditorRelayPayload({ x, y });
+        }, true); // capture — раньше внутренних обработчиков Gradio
+
+        // Клики по миниатюрам уходят тем же relay-каналом: родное
+        // Gallery.select() в Gradio 6 нестабильно (часть кликов не рождала
+        // события вовсе, часть — два подряд). Мы глушим клик до обработчиков
+        // Gradio и шлём {"thumb": индекс}; серверная привязка Gallery.select
+        // остаётся резервом на случай, когда relay недоступен.
+        //
+        // Селектор пункта галереи -- максимально широкий (не только
+        // ".thumbnail-item", актуальный для Gradio 6.8): patch-релизы Gradio 6
+        // не раз переименовывали внутренние CSS-классы, а data-testid/role
+        // атрибуты у Gallery per-item нестабильны между версиями. Считаем
+        // индекс по порядку любых кликабельных потомков сетки -- он совпадает
+        // с порядком value=[...] миниатюр независимо от точного имени класса.
+        const GALLERY_ITEM_SELECTOR = '.thumbnail-item, [data-testid="detailed-image"], button, [role="button"]';
+        const dedupeNestedElements = (elements) => elements.filter(
+            (el, idx) => !elements.slice(0, idx).some((other) => other.contains(el))
+        );
+        // window, не document — см. комментарий у обработчика клика по странице
+        // выше: без этого defaultPrevented мог быть выставлен раньше, чем этот
+        // листенер вообще успевал сработать.
+        window.addEventListener("click", (event) => {
+            if (event.defaultPrevented) return;
+            if (!(event.target instanceof Element)) return;
+            const galleryRoot = event.target.closest(".mineru-editor-thumbnails");
+            if (!galleryRoot) return;
+            const item = event.target.closest(GALLERY_ITEM_SELECTOR);
+            if (!item || !galleryRoot.contains(item)) return;
+            const items = dedupeNestedElements(
+                Array.from(galleryRoot.querySelectorAll(GALLERY_ITEM_SELECTOR))
+            );
+            const thumbIdx = items.indexOf(item);
+            if (thumbIdx < 0) return;
+            if (!findEditorRelayInput()) return; // relay недоступен — пусть отработает Gallery.select
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            try {
+                sendEditorRelayPayload({ thumb: thumbIdx });
+            } catch (error) {
+                // Диагностика для следующей живой проверки: если этот путь
+                // всё ещё молчит, ошибка (если она есть) будет видна в консоли
+                // вместо полного отсутствия каких-либо следов.
+                console.error("mineru editor thumbnail relay failed", error);
+            }
+        }, true);
+
+        // Пикер таблиц: Gradio 6 выбирает пункт Dropdown через onmousedown на
+        // <ul class="options"> (не click), визуально обновляя value/чекмарк --
+        // но итоговый .change() к серверу периодически не долетает (тот же
+        // класс проблем, что и с Image.select/Gallery.select). В отличие от
+        // кликов по странице/миниатюрам здесь НЕ глушим нативное поведение
+        // (оно и так корректно закрывает список и красит галочку) -- просто
+        // параллельно шлём выбор через relay по data-index пункта, который
+        // Gradio проставляет как индекс в исходном (нефильтрованном) массиве
+        // choices -- том же порядке, что строит серверный
+        // _editor_table_selection_keys. Двойной запрос (если .change всё-таки
+        // долетит) безопасен: обработчик выбора идемпотентен.
+        document.addEventListener("mousedown", (event) => {
+            if (!(event.target instanceof Element)) return;
+            const pickerRoot = event.target.closest(".mineru-editor-table-picker");
+            if (!pickerRoot) return;
+            const optionEl = event.target.closest('li[data-testid="dropdown-option"]')
+                || event.target.closest("ul.options li[role='option']")
+                || event.target.closest("ul.options li");
+            if (!optionEl) return;
+            let optionIndex = optionEl.getAttribute("data-index");
+            if (optionIndex === null) {
+                // Резерв на случай отсутствия data-index в другой версии
+                // Gradio: позиция среди пунктов текущего (возможно
+                // отфильтрованного поиском) списка -- хуже, чем настоящий
+                // индекс в исходном массиве choices, но лучше отсутствия
+                // реакции вовсе.
+                const siblings = Array.from(
+                    optionEl.parentElement ? optionEl.parentElement.children : []
+                );
+                optionIndex = siblings.indexOf(optionEl);
+            }
+            const optionIndexNum = Number(optionIndex);
+            if (!Number.isInteger(optionIndexNum) || optionIndexNum < 0) return;
+            if (!findEditorRelayInput()) return;
+            try {
+                sendEditorRelayPayload({ table_option_index: optionIndexNum });
+            } catch (error) {
+                console.error("mineru editor table picker relay failed", error);
+            }
         }, true);
 
         document.addEventListener("keydown", (event) => {

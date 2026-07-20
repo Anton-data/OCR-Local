@@ -102,23 +102,45 @@ def _page_to_pixmap(page: "fitz.Page", dpi: int) -> "fitz.Pixmap":
     return page.get_pixmap(matrix=matrix, alpha=False)
 
 
+def _origin_pdf_stamp(origin_pdf_path: Path) -> str:
+    """Штамп содержимого origin.pdf (mtime+size) для ключа кэша PNG.
+
+    Если документ пере-конвертирован в тот же каталог (API/CLI переиспользуют
+    ``prepare_env``-путь без uuid), origin.pdf перезаписывается -- старые
+    ``page_{idx}.png`` без штампа оставались бы валидными по имени и давали
+    рассинхрон картинки с hit-test."""
+    stat = origin_pdf_path.stat()
+    return f"{stat.st_mtime_ns:x}_{stat.st_size:x}"
+
+
+def _cleanup_stale_cache(cache_dir: Path, prefix: str, keep_name: str) -> None:
+    """Удаляет устаревшие версии кэша той же страницы (best-effort)."""
+    try:
+        for stale in cache_dir.glob(f"{prefix}*.png"):
+            if stale.name != keep_name:
+                stale.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def render_page_base(parse_dir: str | Path, doc_stem: str, page_idx: int) -> "Image.Image":
     """Рендерит страницу ``page_idx`` из ``{doc_stem}_origin.pdf`` (гарантированно
     существует рядом с middle.json для PDF/сканов -- см. ``ORIGIN_PDF_SUFFIX``
     в ``searchable_pdf.py``) и кэширует результат на диск, чтобы повторные
-    клики по той же странице не рендерили её заново."""
+    клики по той же странице не рендерили её заново. Ключ кэша включает
+    mtime+size origin.pdf -- пере-конвертация в тот же каталог инвалидирует
+    старые PNG."""
     parse_dir = Path(parse_dir)
-    cache_dir = parse_dir / EDITOR_CACHE_DIRNAME
-    cache_path = cache_dir / f"page_{page_idx}.png"
-    if cache_path.is_file():
-        with Image.open(cache_path) as cached:
-            return cached.convert("RGB")
-
     origin_pdf_path = parse_dir / f"{doc_stem}{ORIGIN_PDF_SUFFIX}"
     if not origin_pdf_path.is_file():
         raise FileNotFoundError(
             f"Original PDF not found for visual editor: {origin_pdf_path}"
         )
+    cache_dir = parse_dir / EDITOR_CACHE_DIRNAME
+    cache_path = cache_dir / f"page_{page_idx}_{_origin_pdf_stamp(origin_pdf_path)}.png"
+    if cache_path.is_file():
+        with Image.open(cache_path) as cached:
+            return cached.convert("RGB")
 
     doc = fitz.open(str(origin_pdf_path))
     try:
@@ -142,6 +164,7 @@ def render_page_base(parse_dir: str | Path, doc_stem: str, page_idx: int) -> "Im
 
     cache_dir.mkdir(parents=True, exist_ok=True)
     image.save(cache_path, format="PNG")
+    _cleanup_stale_cache(cache_dir, f"page_{page_idx}_", cache_path.name)
     return image
 
 
@@ -152,16 +175,17 @@ _THUMBNAIL_DPI = 60
 def render_thumbnail(parse_dir: str | Path, doc_stem: str, page_idx: int) -> "Image.Image":
     """Маленький превью-рендер страницы для ленты миниатюр -- отдельное
     кэширование от render_page_base (тот кэширует полноразмерный 300dpi PNG,
-    здесь нужен быстрый лёгкий рендер для всех страниц документа разом)."""
+    здесь нужен быстрый лёгкий рендер для всех страниц документа разом).
+    Ключ кэша, как и у render_page_base, включает mtime+size origin.pdf."""
     parse_dir = Path(parse_dir)
-    cache_dir = parse_dir / EDITOR_CACHE_DIRNAME
-    cache_path = cache_dir / f"thumb_{page_idx}.png"
-    if cache_path.is_file():
-        with Image.open(cache_path) as cached:
-            return cached.convert("RGB")
     origin_pdf_path = parse_dir / f"{doc_stem}{ORIGIN_PDF_SUFFIX}"
     if not origin_pdf_path.is_file():
         raise FileNotFoundError(f"Original PDF not found for thumbnail: {origin_pdf_path}")
+    cache_dir = parse_dir / EDITOR_CACHE_DIRNAME
+    cache_path = cache_dir / f"thumb_{page_idx}_{_origin_pdf_stamp(origin_pdf_path)}.png"
+    if cache_path.is_file():
+        with Image.open(cache_path) as cached:
+            return cached.convert("RGB")
     doc = fitz.open(str(origin_pdf_path))
     try:
         if page_idx < 0 or page_idx >= doc.page_count:
@@ -174,6 +198,7 @@ def render_thumbnail(parse_dir: str | Path, doc_stem: str, page_idx: int) -> "Im
         doc.close()
     cache_dir.mkdir(parents=True, exist_ok=True)
     image.save(cache_path, format="PNG")
+    _cleanup_stale_cache(cache_dir, f"thumb_{page_idx}_", cache_path.name)
     return image
 
 
@@ -400,7 +425,7 @@ def find_next_suspect_block(
     start_page_idx: int,
     start_block_idx: int | None = None,
     threshold: float = _LOW_CONFIDENCE_SCORE_THRESHOLD,
-) -> tuple[int, int] | None:
+) -> tuple[int, str] | None:
     """Ищет следующий блок с min_score < threshold, начиная со start_page_idx
     (на этой странице -- только блоки С block_idx БОЛЬШЕ start_block_idx, если
     он задан), дальше по всем страницам по кругу. Если после полного круга
@@ -422,7 +447,7 @@ def find_next_suspect_block(
         ]
         if candidates:
             candidates.sort(key=lambda b: b["block_idx"])
-            return page_idx, candidates[0]["block_idx"]
+            return page_idx, candidates[0]["selection_id"]
 
     if start_block_idx is not None:
         blocks = list_page_blocks(middle_json, start_page_idx)
@@ -432,9 +457,25 @@ def find_next_suspect_block(
         ]
         if candidates:
             candidates.sort(key=lambda b: b["block_idx"])
-            return start_page_idx, candidates[0]["block_idx"]
+            return start_page_idx, candidates[0]["selection_id"]
 
     return None
+
+
+def has_confidence_scores(middle_json: dict[str, Any]) -> bool:
+    """Возвращает ``True``, только если backend отдал хотя бы один score.
+
+    Hybrid-engine не заполняет score для ряда документов. В этом случае
+    «следующий подозрительный» не может честно выбрать блок, поэтому UI
+    сообщает об отсутствии данных вместо неочевидного «ничего не произошло»."""
+    pages = middle_json.get("pdf_info") or []
+    if not isinstance(pages, list):
+        return False
+    return any(
+        block.get("min_score") is not None
+        for page_idx in range(len(pages))
+        for block in list_page_blocks(middle_json, page_idx)
+    )
 
 
 def get_block_snippet(
@@ -556,6 +597,150 @@ def find_table_span(block: dict[str, Any]) -> dict[str, Any] | None:
             if found is not None:
                 return found
     return None
+
+
+def _bbox_match_score(
+    first: tuple[float, float, float, float], second: tuple[float, float, float, float]
+) -> float:
+    """Схожесть двух нормализованных ``(x0, y0, x1, y1)`` bbox:
+    ``max(IoU, пересечение/меньшая-площадь)``. Второй член спасает пары
+    «полностраничная таблица в model.json» против «обрезанный по OCR-строкам
+    bbox в middle.json» -- у них IoU может провалиться ниже любого разумного
+    порога, хотя меньший bbox почти целиком лежит внутри большего."""
+    x0 = max(first[0], second[0])
+    y0 = max(first[1], second[1])
+    x1 = min(first[2], second[2])
+    y1 = min(first[3], second[3])
+    intersection = max(0.0, x1 - x0) * max(0.0, y1 - y0)
+    if not intersection:
+        return 0.0
+    first_area = max(0.0, first[2] - first[0]) * max(0.0, first[3] - first[1])
+    second_area = max(0.0, second[2] - second[0]) * max(0.0, second[3] - second[1])
+    union = first_area + second_area - intersection
+    iou = intersection / union if union else 0.0
+    smaller_area = min(first_area, second_area)
+    containment = intersection / smaller_area if smaller_area else 0.0
+    return max(iou, containment)
+
+
+def _normalize_bbox(
+    bbox: list[float] | tuple[float, ...], page_size: tuple[float, float]
+) -> tuple[float, float, float, float]:
+    page_width, page_height = page_size
+    return (
+        float(bbox[0]) / page_width,
+        float(bbox[1]) / page_height,
+        float(bbox[2]) / page_width,
+        float(bbox[3]) / page_height,
+    )
+
+
+def _ensure_table_span(block: dict[str, Any], table_html: str) -> dict[str, Any]:
+    """Store recovered table HTML in the canonical ``table_body`` structure.
+
+    Some hybrid-engine results contain the table geometry in ``middle.json``
+    but leave ``table_body.lines`` empty.  Persisting the recovered HTML in
+    this structure makes subsequent export regeneration deterministic.
+    """
+    table_body = next(
+        (
+            child
+            for child in block.get("blocks") or []
+            if isinstance(child, dict) and child.get("type") == "table_body"
+        ),
+        None,
+    )
+    if table_body is None:
+        table_body = {
+            "type": "table_body",
+            "bbox": block.get("bbox"),
+            "lines": [],
+        }
+        block.setdefault("blocks", []).append(table_body)
+
+    span = {
+        "type": "table",
+        "bbox": table_body.get("bbox") or block.get("bbox"),
+        "html": table_html,
+    }
+    lines = table_body.setdefault("lines", [])
+    if lines:
+        lines[0].setdefault("spans", []).append(span)
+    else:
+        lines.append({"bbox": table_body.get("bbox") or block.get("bbox"), "spans": [span]})
+    return span
+
+
+def recover_table_span_from_model(
+    parse_dir: str | Path,
+    doc_stem: str,
+    page_idx: int,
+    block: dict[str, Any],
+    page_size: tuple[float, float],
+) -> dict[str, Any] | None:
+    """Recover a missing table HTML span from MinerU's per-page model output.
+
+    ``*_model.json`` retains the model's table HTML even for hybrid outputs
+    where the later middle-json finalisation has dropped the table-body spans.
+    Matching is constrained to the same page; the best candidate is scored by
+    ``max(IoU, intersection/smaller-area)``.  A lone candidate on the page is
+    accepted with any non-trivial overlap (score > 0.05) -- there is nothing
+    to confuse it with; with several candidates a score of at least 0.3 is
+    required so an unrelated table is never offered for editing.
+    """
+    existing = find_table_span(block)
+    if existing:
+        return existing
+    bbox = block.get("bbox")
+    if not bbox or len(bbox) != 4:
+        return None
+
+    model_path = Path(parse_dir) / f"{doc_stem}_model.json"
+    if not model_path.is_file():
+        return None
+    try:
+        model_pages = json.loads(model_path.read_text(encoding="utf-8"))
+        model_blocks = model_pages[page_idx] if isinstance(model_pages, list) else []
+    except (IndexError, OSError, ValueError, json.JSONDecodeError) as exc:
+        logger.warning(f"Could not read model table fallback for {doc_stem}: {exc}")
+        return None
+    if not isinstance(model_blocks, list):
+        return None
+
+    target_bbox = _normalize_bbox(bbox, page_size)
+    best_html = None
+    best_score = 0.0
+    candidate_count = 0
+    for model_block in model_blocks:
+        if not isinstance(model_block, dict) or model_block.get("type") != "table":
+            continue
+        table_html = model_block.get("content")
+        model_bbox = model_block.get("bbox")
+        if not isinstance(table_html, str) or "<table" not in table_html.lower():
+            continue
+        if not isinstance(model_bbox, (list, tuple)) or len(model_bbox) != 4:
+            continue
+        try:
+            candidate_bbox = tuple(float(value) for value in model_bbox)
+        except (TypeError, ValueError):
+            continue
+        if max(abs(value) for value in candidate_bbox) > 2:
+            candidate_bbox = _normalize_bbox(candidate_bbox, page_size)
+        candidate_count += 1
+        score = _bbox_match_score(target_bbox, candidate_bbox)
+        if score > best_score:
+            best_score = score
+            best_html = table_html
+
+    min_score = 0.05 if candidate_count == 1 else 0.3
+    if best_html is None or best_score < min_score:
+        if candidate_count:
+            logger.warning(
+                f"Table recovery for {doc_stem} page {page_idx}: no confident match "
+                f"among {candidate_count} candidate(s), best score {best_score:.3f}"
+            )
+        return None
+    return _ensure_table_span(block, best_html)
 
 
 class _EditableTableBuilder(HTMLParser):
