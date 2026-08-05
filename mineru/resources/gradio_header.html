@@ -1,0 +1,55 @@
+<aside class="mineru-app-sidebar{{HEADER_GRADIO_VERSION_CLASS}}">
+  <div class="mineru-brand">
+    <div class="mineru-brand-mark" aria-hidden="true">M</div>
+    <div class="mineru-brand-copy">
+      <strong>MinerU</strong>
+      <span>{{APP_WORKSPACE}}</span>
+    </div>
+  </div>
+
+  <nav class="mineru-tool-navigation" aria-label="{{TOOLS_LABEL_ATTR}}">
+    <div class="mineru-sidebar-label">{{TOOLS_LABEL}}</div>
+
+    <div class="mineru-tool-item is-active" aria-current="page">
+      <span class="mineru-tool-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M7 3.75h7.6L19 8.15V20.25H7V3.75Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+          <path d="M14.25 3.75V8.5H19M10 12h6M10 15.5h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </span>
+      <span class="mineru-tool-copy">
+        <strong>{{HEADER_TITLE}}</strong>
+        <small>{{ACTIVE_TOOL}}</small>
+      </span>
+    </div>
+
+    <div class="mineru-tool-slots" aria-label="{{FUTURE_TOOLS_ATTR}}">
+      <div class="mineru-tool-slot">
+        <span class="mineru-slot-plus" aria-hidden="true">+</span>
+        <span><strong>{{TOOL_SLOT}}</strong><small>{{TOOL_SLOT_HINT}}</small></span>
+      </div>
+      <div class="mineru-tool-slot">
+        <span class="mineru-slot-plus" aria-hidden="true">+</span>
+        <span><strong>{{TOOL_SLOT}}</strong><small>{{TOOL_SLOT_HINT}}</small></span>
+      </div>
+      <div class="mineru-tool-slot">
+        <span class="mineru-slot-plus" aria-hidden="true">+</span>
+        <span><strong>{{TOOL_SLOT}}</strong><small>{{TOOL_SLOT_HINT}}</small></span>
+      </div>
+    </div>
+  </nav>
+
+  <div class="mineru-sidebar-footer">
+    <div class="mineru-local-status">
+      <span class="mineru-status-indicator" aria-hidden="true"></span>
+      <span>{{LOCAL_MODE}}</span>
+    </div>
+    <div class="mineru-language-row">
+      <span class="mineru-language-label">{{LANGUAGE_LABEL}}</span>
+      <div class="mineru-language-switch" role="group" aria-label="{{LANGUAGE_LABEL_ATTR}}">
+        <button type="button" class="mineru-language-option" data-mineru-locale="ru" aria-label="Русский" aria-pressed="false">RU</button>
+        <button type="button" class="mineru-language-option" data-mineru-locale="uk" aria-label="Українська" aria-pressed="false">UA</button>
+      </div>
+    </div>
+  </div>
+</aside>

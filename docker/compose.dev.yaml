@@ -1,0 +1,86 @@
+name: mineru-dev
+
+x-mineru-common: &mineru-common
+  image: mineru:dev
+  build:
+    context: ..
+    dockerfile: docker/dev/Dockerfile
+  working_dir: /workspace/MinerU
+  environment:
+    MINERU_MODEL_SOURCE: local
+    MINERU_TOOLS_CONFIG_JSON: /opt/mineru-config/mineru.json
+    MINERU_API_OUTPUT_ROOT: /workspace/MinerU/output
+    # Пакетный режим читает и сохраняет документы рядом с исходниками на D:.
+    MINERU_BATCH_HOST_ROOT: /host-d
+    MINERU_BATCH_SOURCE_DRIVE: D
+  volumes:
+    - ../:/workspace/MinerU
+    - "D:/:/host-d"
+    - mineru-model-cache:/root/.cache
+    - mineru-config:/opt/mineru-config
+  ulimits:
+    memlock: -1
+    stack: 67108864
+  ipc: host
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            device_ids: ["0"]
+            capabilities: [gpu]
+
+services:
+  mineru-api:
+    <<: *mineru-common
+    container_name: mineru-api-dev
+    restart: unless-stopped
+    entrypoint: mineru-api
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --reload
+    ports:
+      - "${MINERU_API_PORT:-8001}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  mineru-gradio:
+    <<: *mineru-common
+    profiles: ["gradio"]
+    container_name: mineru-gradio-dev
+    restart: unless-stopped
+    entrypoint: mineru-gradio
+    command:
+      - --server-name
+      - 0.0.0.0
+      - --server-port
+      - "7860"
+    ports:
+      - "7860:7860"
+
+  mineru-models:
+    <<: *mineru-common
+    profiles: ["models"]
+    container_name: mineru-models-init
+    restart: "no"
+    environment:
+      MINERU_MODEL_SOURCE: huggingface
+      MINERU_TOOLS_CONFIG_JSON: /opt/mineru-config/mineru.json
+      HF_HUB_DISABLE_XET: "1"
+    entrypoint: mineru-models-download
+    command:
+      - --source
+      - huggingface
+      - --model_type
+      - "${MINERU_MODEL_TYPE:-all}"
+
+volumes:
+  mineru-model-cache:
+  mineru-config:
