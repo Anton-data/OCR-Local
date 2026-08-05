@@ -10,8 +10,12 @@ x-mineru-common: &mineru-common
     MINERU_MODEL_SOURCE: local
     MINERU_TOOLS_CONFIG_JSON: /opt/mineru-config/mineru.json
     MINERU_API_OUTPUT_ROOT: /workspace/MinerU/output
+    # Пакетный режим читает и сохраняет документы рядом с исходниками на D:.
+    MINERU_BATCH_HOST_ROOT: /host-d
+    MINERU_BATCH_SOURCE_DRIVE: D
   volumes:
     - ../:/workspace/MinerU
+    - "D:/:/host-d"
     - mineru-model-cache:/root/.cache
     - mineru-config:/opt/mineru-config
   ulimits:

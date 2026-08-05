@@ -1010,11 +1010,19 @@ def export_searchable_pdf(
             mid_page = pages_info[page_idx]
             if not isinstance(mid_page, dict):
                 continue
+            # ``discarded_blocks`` holds recognised headers / footers that are
+            # deliberately excluded from the body-reading order.  They still
+            # exist on the rendered page (and are included in Markdown), so
+            # omitting them here makes visibly recognised text impossible to
+            # select or search in the resulting PDF.
             blocks = mid_page.get("para_blocks") or mid_page.get("preproc_blocks") or []
+            discarded_blocks = mid_page.get("discarded_blocks") or []
             if not isinstance(blocks, list):
-                continue
+                blocks = []
+            if not isinstance(discarded_blocks, list):
+                discarded_blocks = []
 
-            for bbox, text, angle in _iter_line_texts(blocks):
+            for bbox, text, angle in _iter_line_texts([*discarded_blocks, *blocks]):
                 _insert_invisible_line(
                     new_page,
                     bbox,
